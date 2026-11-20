@@ -82,8 +82,8 @@ public final class ZoneSurfaceRenderer {
 
         // Two upward-facing triangles, each encoded as a degenerate quad because
         // the vanilla debug-quads layer uses the QUADS vertex format.
-        triangle(out, matrix, minX, y, minZ, minX, y, maxZ, maxX, y, maxZ, color);
-        triangle(out, matrix, minX, y, minZ, maxX, y, maxZ, maxX, y, minZ, color);
+        triangle(out, matrix, minX, minZ, minX, maxZ, maxX, maxZ, y, color);
+        triangle(out, matrix, minX, minZ, maxX, maxZ, maxX, minZ, y, color);
     }
 
     private static void emitCircle(VertexConsumer out, MatrixStack.Entry matrix,
@@ -97,14 +97,13 @@ public final class ZoneSurfaceRenderer {
             double bx = centerX + Math.cos(b) * radius;
             double bz = centerZ + Math.sin(b) * radius;
             // Reverse perimeter order to keep the normal facing upward.
-            triangle(out, matrix, centerX, y, centerZ, bx, y, bz, ax, y, az, color);
+            triangle(out, matrix, centerX, centerZ, bx, bz, ax, az, y, color);
         }
     }
 
     private static void triangle(VertexConsumer out, MatrixStack.Entry matrix,
-                                 double ax, float y, double az,
-                                 double bx, float ignoredY, double bz,
-                                 double cx, float ignoredY2, double cz, int color) {
+                                 double ax, double az, double bx, double bz,
+                                 double cx, double cz, float y, int color) {
         vertex(out, matrix, ax, y, az, color);
         vertex(out, matrix, bx, y, bz, color);
         vertex(out, matrix, cx, y, cz, color);
