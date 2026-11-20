@@ -1,12 +1,12 @@
 package dev.voxyexclude;
 
 import me.cortex.voxy.common.voxelization.VoxelizedSection;
-import me.cortex.voxy.common.voxelization.WorldVoxilizedSectionMipper;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 import me.cortex.voxy.common.world.WorldUpdater;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
 import me.cortex.voxy.common.world.other.Mapper;
+import me.cortex.voxy.common.world.other.Mipper;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
@@ -247,7 +247,7 @@ public final class ZoneVoxelOverlay {
                         if (!changed) continue;
 
                         voxelized.lvl0NonAirCount = countNonAir(voxelized.section);
-                        WorldVoxilizedSectionMipper.mipSection(voxelized, engine.getMapper());
+                        mipSection(voxelized, engine.getMapper());
                         insertWithoutSaving(engine, voxelized);
                     }
                 }
@@ -359,6 +359,87 @@ public final class ZoneVoxelOverlay {
         return Math.abs(dx) <= zone.size() && Math.abs(dz) <= zone.size();
     }
 
+
+    private static void mipSection(VoxelizedSection section, Mapper mapper) {
+        long[] data = section.section;
+
+        // 16^3 -> 8^3
+        int out = 16 * 16 * 16;
+        for (int y = 0; y < 8; y++) {
+            for (int z = 0; z < 8; z++) {
+                for (int x = 0; x < 8; x++) {
+                    int sx = x << 1, sy = y << 1, sz = z << 1;
+                    data[out++] = Mipper.mip(
+                            data[voxelIndex(sx, sy, sz)], data[voxelIndex(sx + 1, sy, sz)],
+                            data[voxelIndex(sx, sy, sz + 1)], data[voxelIndex(sx + 1, sy, sz + 1)],
+                            data[voxelIndex(sx, sy + 1, sz)], data[voxelIndex(sx + 1, sy + 1, sz)],
+                            data[voxelIndex(sx, sy + 1, sz + 1)], data[voxelIndex(sx + 1, sy + 1, sz + 1)],
+                            mapper
+                    );
+                }
+            }
+        }
+
+        // 8^3 -> 4^3
+        out = 16 * 16 * 16 + 8 * 8 * 8;
+        for (int y = 0; y < 4; y++) {
+            for (int z = 0; z < 4; z++) {
+                for (int x = 0; x < 4; x++) {
+                    int sx = x << 1, sy = y << 1, sz = z << 1;
+                    data[out++] = Mipper.mip(
+                            data[mip1Index(sx, sy, sz)], data[mip1Index(sx + 1, sy, sz)],
+                            data[mip1Index(sx, sy, sz + 1)], data[mip1Index(sx + 1, sy, sz + 1)],
+                            data[mip1Index(sx, sy + 1, sz)], data[mip1Index(sx + 1, sy + 1, sz)],
+                            data[mip1Index(sx, sy + 1, sz + 1)], data[mip1Index(sx + 1, sy + 1, sz + 1)],
+                            mapper
+                    );
+                }
+            }
+        }
+
+        // 4^3 -> 2^3
+        out = 16 * 16 * 16 + 8 * 8 * 8 + 4 * 4 * 4;
+        for (int y = 0; y < 2; y++) {
+            for (int z = 0; z < 2; z++) {
+                for (int x = 0; x < 2; x++) {
+                    int sx = x << 1, sy = y << 1, sz = z << 1;
+                    data[out++] = Mipper.mip(
+                            data[mip2Index(sx, sy, sz)], data[mip2Index(sx + 1, sy, sz)],
+                            data[mip2Index(sx, sy, sz + 1)], data[mip2Index(sx + 1, sy, sz + 1)],
+                            data[mip2Index(sx, sy + 1, sz)], data[mip2Index(sx + 1, sy + 1, sz)],
+                            data[mip2Index(sx, sy + 1, sz + 1)], data[mip2Index(sx + 1, sy + 1, sz + 1)],
+                            mapper
+                    );
+                }
+            }
+        }
+
+        // 2^3 -> 1^3
+        data[16 * 16 * 16 + 8 * 8 * 8 + 4 * 4 * 4 + 2 * 2 * 2] = Mipper.mip(
+                data[mip3Index(0, 0, 0)], data[mip3Index(1, 0, 0)],
+                data[mip3Index(0, 0, 1)], data[mip3Index(1, 0, 1)],
+                data[mip3Index(0, 1, 0)], data[mip3Index(1, 1, 0)],
+                data[mip3Index(0, 1, 1)], data[mip3Index(1, 1, 1)],
+                mapper
+        );
+    }
+
+    private static int voxelIndex(int x, int y, int z) {
+        return (y << 8) | (z << 4) | x;
+    }
+
+    private static int mip1Index(int x, int y, int z) {
+        return 4096 + (y << 6) + (z << 3) + x;
+    }
+
+    private static int mip2Index(int x, int y, int z) {
+        return 4096 + 512 + (y << 4) + (z << 2) + x;
+    }
+
+    private static int mip3Index(int x, int y, int z) {
+        return 4096 + 512 + 64 + (y << 2) + (z << 1) + x;
+    }
+
     private static int countNonAir(long[] data) {
         int count = 0;
         for (int i = 0; i < 16 * 16 * 16; i++) {
@@ -420,7 +501,7 @@ public final class ZoneVoxelOverlay {
         if (!changed) return false;
 
         section.lvl0NonAirCount = countNonAir(section.section);
-        WorldVoxilizedSectionMipper.mipSection(section, engine.getMapper());
+        mipSection(section, engine.getMapper());
         SUPPRESS_SAVE.set(true);
         CLEAR_ON_RETURN.set(true);
         return true;
