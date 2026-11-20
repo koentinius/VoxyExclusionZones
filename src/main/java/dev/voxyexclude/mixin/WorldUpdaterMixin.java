@@ -15,6 +15,7 @@ public abstract class WorldUpdaterMixin {
     private static void voxyexclude$overlayIncomingSection(
             WorldEngine engine, VoxelizedSection section, CallbackInfo ci
     ) {
+        ZoneVoxelOverlay.lockUpdate(section);
         ZoneVoxelOverlay.beginIngest(engine, section);
     }
 
@@ -23,5 +24,6 @@ public abstract class WorldUpdaterMixin {
             WorldEngine engine, VoxelizedSection section, CallbackInfo ci
     ) {
         ZoneVoxelOverlay.endIngest();
+        ZoneVoxelOverlay.unlockUpdate();
     }
 }
