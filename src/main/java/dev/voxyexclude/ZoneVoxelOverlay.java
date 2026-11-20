@@ -37,7 +37,7 @@ public final class ZoneVoxelOverlay {
     private static final int SECTION_BLOCK_SIZE = 32;
     private static final int REPLACEMENT_DEPTH_BLOCKS = 30;
     // Reserved synthetic marker in Voxy's 9-bit biome field (vanilla IDs are below 256).
-    public static final int SYNTHETIC_BIOME_ID = 256;
+    public static final int SYNTHETIC_BIOME_MARKER = 256;
     private static final int MAX_QUEUED_SECTIONS = 500_000;
     private static final int SECTIONS_PER_TICK = 3;
 
@@ -419,7 +419,8 @@ public final class ZoneVoxelOverlay {
             // light, and biome data. Preserving metadata from the original terrain
             // creates visible block-shaped shading/biome seams in the replacement.
             replacementIds[i] = Mapper.composeMappingId(zoneData.light,
-                    mapper.getIdForBlockState(zoneData.state), SYNTHETIC_BIOME_ID);
+                    mapper.getIdForBlockState(zoneData.state),
+                    mapper.getIdForBiome(zoneData.biome) | SYNTHETIC_BIOME_MARKER);
             intersects[i] = true;
             anyIntersect = true;
         }
@@ -564,14 +565,14 @@ public final class ZoneVoxelOverlay {
             long i010, long i110, long i011, long i111,
             Mapper mapper
     ) {
-        if (Mapper.getBiomeId(i111) == SYNTHETIC_BIOME_ID) return i111;
-        if (Mapper.getBiomeId(i110) == SYNTHETIC_BIOME_ID) return i110;
-        if (Mapper.getBiomeId(i011) == SYNTHETIC_BIOME_ID) return i011;
-        if (Mapper.getBiomeId(i010) == SYNTHETIC_BIOME_ID) return i010;
-        if (Mapper.getBiomeId(i101) == SYNTHETIC_BIOME_ID) return i101;
-        if (Mapper.getBiomeId(i100) == SYNTHETIC_BIOME_ID) return i100;
-        if (Mapper.getBiomeId(i001) == SYNTHETIC_BIOME_ID) return i001;
-        if (Mapper.getBiomeId(i000) == SYNTHETIC_BIOME_ID) return i000;
+        if ((Mapper.getBiomeId(i111) & SYNTHETIC_BIOME_MARKER) != 0) return i111;
+        if ((Mapper.getBiomeId(i110) & SYNTHETIC_BIOME_MARKER) != 0) return i110;
+        if ((Mapper.getBiomeId(i011) & SYNTHETIC_BIOME_MARKER) != 0) return i011;
+        if ((Mapper.getBiomeId(i010) & SYNTHETIC_BIOME_MARKER) != 0) return i010;
+        if ((Mapper.getBiomeId(i101) & SYNTHETIC_BIOME_MARKER) != 0) return i101;
+        if ((Mapper.getBiomeId(i100) & SYNTHETIC_BIOME_MARKER) != 0) return i100;
+        if ((Mapper.getBiomeId(i001) & SYNTHETIC_BIOME_MARKER) != 0) return i001;
+        if ((Mapper.getBiomeId(i000) & SYNTHETIC_BIOME_MARKER) != 0) return i000;
         return Mipper.mip(i000, i100, i001, i101, i010, i110, i011, i111, mapper);
     }
 
