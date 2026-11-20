@@ -61,7 +61,6 @@ public final class ZoneVoxelOverlay {
     private static volatile WorldEngine activeEngine;
     private static volatile Snapshot appliedSnapshot = Snapshot.empty();
     private static volatile Snapshot pendingTargetSnapshot;
-    private static volatile boolean pendingRestore;
     private static final ConcurrentLinkedQueue<SectionWork> pendingSections = new ConcurrentLinkedQueue<>();
     private static final ExecutorService sectionWorker = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "Voxy Exclusion Zones section updater");
@@ -74,7 +73,7 @@ public final class ZoneVoxelOverlay {
 
     private ZoneVoxelOverlay() {}
 
-    /** Refreshes biome/light inputs and processes a small amount of section work on the client thread. */
+    /** Refreshes biome/light inputs on the client thread and schedules section work in the background. */
     public static void refreshSnapshot(MinecraftClient client) {
         Snapshot previous = snapshot;
         ClientWorld world = client.world;
@@ -144,8 +143,7 @@ public final class ZoneVoxelOverlay {
             if (engine != null && !current.zones.isEmpty()) {
                 queueZones(current.zones, current.bottomY, false);
                 pendingTargetSnapshot = current;
-                pendingRestore = false;
-            } else {
+                } else {
                 appliedSnapshot = current;
             }
             return;
@@ -164,7 +162,6 @@ public final class ZoneVoxelOverlay {
 
         queueZones(List.copyOf(zonesToRefresh), current.bottomY, true);
         pendingTargetSnapshot = current;
-        pendingRestore = true;
         if (pendingSections.isEmpty()) {
             appliedSnapshot = current;
             pendingTargetSnapshot = null;
@@ -304,8 +301,7 @@ public final class ZoneVoxelOverlay {
                 if (pendingSections.isEmpty() && pendingTargetSnapshot != null) {
                     appliedSnapshot = pendingTargetSnapshot;
                     pendingTargetSnapshot = null;
-                    pendingRestore = false;
-                }
+                            }
             } finally {
                 workerScheduled.set(false);
                 // Close the race where new work arrived after the drain observed
