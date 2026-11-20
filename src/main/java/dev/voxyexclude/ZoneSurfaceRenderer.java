@@ -7,7 +7,6 @@ import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.Vec3d;
 
-import java.lang.reflect.Method;
 
 /**
  * Draws flat replacement platforms over the areas removed by the Voxy fragment
@@ -17,7 +16,6 @@ import java.lang.reflect.Method;
 public final class ZoneSurfaceRenderer {
     private static final int CIRCLE_SEGMENTS = 64;
     private static final float SURFACE_EPSILON = 0.002f;
-    private static RenderLayer debugQuadsLayer;
 
     private ZoneSurfaceRenderer() {}
 
@@ -44,7 +42,7 @@ public final class ZoneSurfaceRenderer {
         matrices.push();
 
         try {
-            VertexConsumer vertices = context.consumers().getBuffer(debugQuadsLayer());
+            VertexConsumer vertices = context.consumers().getBuffer(DebugQuadLayer.get());
             MatrixStack.Entry matrix = matrices.peek();
 
             for (Zone zone : zones) {
@@ -60,32 +58,6 @@ public final class ZoneSurfaceRenderer {
             }
         } finally {
             matrices.pop();
-        }
-    }
-
-    /**
-     * Minecraft 1.21.10 exposes this layer on RenderLayer; 1.21.11 moved it
-     * to RenderLayers. Resolve once so the same source supports both targets.
-     */
-    private static RenderLayer debugQuadsLayer() {
-        if (debugQuadsLayer == null) {
-            debugQuadsLayer = resolveDebugQuadsLayer();
-        }
-        return debugQuadsLayer;
-    }
-
-    private static RenderLayer resolveDebugQuadsLayer() {
-        try {
-            Method method;
-            try {
-                method = RenderLayer.class.getMethod("getDebugQuads");
-            } catch (NoSuchMethodException movedIn12111) {
-                Class<?> renderLayers = Class.forName("net.minecraft.client.render.RenderLayers");
-                method = renderLayers.getMethod("debugQuads");
-            }
-            return (RenderLayer) method.invoke(null);
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Unable to locate Minecraft's debug quad render layer", e);
         }
     }
 
