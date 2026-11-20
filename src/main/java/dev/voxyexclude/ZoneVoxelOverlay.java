@@ -16,7 +16,6 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.LightType;
 import net.minecraft.world.biome.Biome;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -24,6 +23,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -39,7 +41,6 @@ public final class ZoneVoxelOverlay {
     // Reserved synthetic marker in Voxy's 9-bit biome field (vanilla IDs are below 256).
     public static final long SYNTHETIC_VOXEL_MARKER = 1L;
     private static final int MAX_QUEUED_SECTIONS = 500_000;
-    private static final int SECTIONS_PER_TICK = 3;
 
     private static final ThreadLocal<Boolean> SUPPRESS_SAVE =
             ThreadLocal.withInitial(() -> false);
@@ -56,12 +57,17 @@ public final class ZoneVoxelOverlay {
 
     private static volatile Snapshot snapshot = Snapshot.empty();
 
-    private static WorldEngine activeEngine;
-    private static Snapshot appliedSnapshot = Snapshot.empty();
-    private static Snapshot pendingTargetSnapshot;
-    private static boolean pendingRestore;
-    private static final ArrayDeque<Long> pendingSections = new ArrayDeque<>();
-    private static final ConcurrentLinkedQueue<Long> acquiredSections = new ConcurrentLinkedQueue<>();
+    private static volatile WorldEngine activeEngine;
+    private static volatile Snapshot appliedSnapshot = Snapshot.empty();
+    private static volatile Snapshot pendingTargetSnapshot;
+    private static volatile boolean pendingRestore;
+    private static final ConcurrentLinkedQueue<SectionWork> pendingSections = new ConcurrentLinkedQueue<>();
+    private static final ExecutorService sectionWorker = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "Voxy Exclusion Zones section updater");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final AtomicBoolean workerScheduled = new AtomicBoolean();
     private static final Set<Long> acquiredSectionKeys = ConcurrentHashMap.newKeySet();
     private static final Set<Long> processingSectionKeys = ConcurrentHashMap.newKeySet();
 
@@ -135,7 +141,7 @@ public final class ZoneVoxelOverlay {
             appliedSnapshot = Snapshot.empty();
             pendingTargetSnapshot = null;
             if (engine != null && !current.zones.isEmpty()) {
-                queueZones(current.zones, current.bottomY);
+                queueZones(current.zones, current.bottomY, false);
                 pendingTargetSnapshot = current;
                 pendingRestore = false;
             } else {
@@ -155,7 +161,7 @@ public final class ZoneVoxelOverlay {
         if (pendingTargetSnapshot != null) zonesToRefresh.addAll(pendingTargetSnapshot.zones);
         zonesToRefresh.addAll(current.zones);
 
-        queueZones(List.copyOf(zonesToRefresh), current.bottomY);
+        queueZones(List.copyOf(zonesToRefresh), current.bottomY, true);
         pendingTargetSnapshot = current;
         pendingRestore = true;
         if (pendingSections.isEmpty()) {
@@ -164,7 +170,7 @@ public final class ZoneVoxelOverlay {
         }
     }
 
-    private static void queueZones(List<ZoneData> zones, int bottomY) {
+    private static void queueZones(List<ZoneData> zones, int bottomY, boolean restoreFromStorage) {
         List<ZoneSectionCursor> cursors = new ArrayList<>();
         for (ZoneData zoneData : zones) {
             ZoneSectionCursor cursor = new ZoneSectionCursor(zoneData.zone, bottomY);
@@ -186,7 +192,7 @@ public final class ZoneVoxelOverlay {
             }
         } while (madeProgress && unique.size() < MAX_QUEUED_SECTIONS);
 
-        pendingSections.addAll(unique);
+        for (long key : unique) pendingSections.offer(new SectionWork(key, restoreFromStorage));
     }
 
     private static final class ZoneSectionCursor {
@@ -265,28 +271,47 @@ public final class ZoneVoxelOverlay {
         return dx * dx + dz * dz <= (double) zone.size() * zone.size();
     }
 
+    /**
+     * Runs synthetic section refreshes asynchronously instead of consuming a
+     * fixed number on the client tick. The actual voxel writes still go through
+     * Voxy's WorldUpdater.insertUpdate path, which dirties and rebuilds the
+     * ordinary Voxy LOD sections.
+     */
     private static void processPendingSections() {
         WorldEngine engine = activeEngine;
-        if (engine == null || !engine.isLive()) return;
+        if (engine == null || !engine.isLive() || pendingSections.isEmpty()) return;
+        if (!workerScheduled.compareAndSet(false, true)) return;
 
-        for (int i = 0; i < SECTIONS_PER_TICK; i++) {
-            Long acquiredKey = acquiredSections.poll();
-            if (acquiredKey != null) {
-                acquiredSectionKeys.remove(acquiredKey);
-                processSection(engine, acquiredKey, false);
-            } else if (!pendingSections.isEmpty()) {
-                long key = pendingSections.removeFirst();
-                processSection(engine, key, pendingRestore);
-            } else {
-                break;
+        sectionWorker.execute(() -> {
+            try {
+                SectionWork work;
+                while ((work = pendingSections.poll()) != null) {
+                    WorldEngine currentEngine = activeEngine;
+                    if (currentEngine == null || currentEngine != engine || !currentEngine.isLive()) {
+                        break;
+                    }
+                    acquiredSectionKeys.remove(work.key);
+                    try {
+                        processSection(currentEngine, work.key, work.restoreFromStorage);
+                    } catch (Throwable error) {
+                        System.err.println("[Voxy Exclusion Zones] Failed to refresh section "
+                                + work.key + ": " + error);
+                        error.printStackTrace();
+                    }
+                }
+
+                if (pendingSections.isEmpty() && pendingTargetSnapshot != null) {
+                    appliedSnapshot = pendingTargetSnapshot;
+                    pendingTargetSnapshot = null;
+                    pendingRestore = false;
+                }
+            } finally {
+                workerScheduled.set(false);
+                // Close the race where new work arrived after the drain observed
+                // an empty queue but before it released the scheduled flag.
+                processPendingSections();
             }
-        }
-
-        if (pendingSections.isEmpty() && pendingTargetSnapshot != null) {
-            appliedSnapshot = pendingTargetSnapshot;
-            pendingTargetSnapshot = null;
-            pendingRestore = false;
-        }
+        });
     }
 
     private static void processSection(WorldEngine engine, long key, boolean restoreFromStorage) {
@@ -357,7 +382,10 @@ public final class ZoneVoxelOverlay {
             if (maxY > zoneBottomY && minY <= zone.surfaceY()
                     && !processingSectionKeys.contains(section.key)
                     && intersectsHorizontalSection(section.x, section.z, zone)) {
-                if (acquiredSectionKeys.add(section.key)) acquiredSections.offer(section.key);
+                if (acquiredSectionKeys.add(section.key)) {
+                    pendingSections.offer(new SectionWork(section.key, false));
+                    processPendingSections();
+                }
                 return;
             }
         }
@@ -705,7 +733,6 @@ public final class ZoneVoxelOverlay {
 
     private static void clearPending() {
         pendingSections.clear();
-        acquiredSections.clear();
         acquiredSectionKeys.clear();
         processingSectionKeys.clear();
         pendingTargetSnapshot = null;
@@ -740,6 +767,7 @@ public final class ZoneVoxelOverlay {
         return SUPPRESS_SAVE.get();
     }
 
+    private record SectionWork(long key, boolean restoreFromStorage) {}
     private record ZoneData(Zone zone, BlockState state, RegistryEntry<Biome> biome, byte light) {}
     private record Snapshot(ClientWorld world, long revision, int bottomY, List<ZoneData> zones) {
         private static Snapshot empty() {
