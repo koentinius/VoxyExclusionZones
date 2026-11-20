@@ -50,6 +50,7 @@ public final class ZoneVoxelOverlay {
     private static final ReentrantLock[] UPDATE_LOCKS = createUpdateLocks();
     private static final ThreadLocal<ArrayDeque<ReentrantLock>> HELD_UPDATE_LOCKS =
             ThreadLocal.withInitial(ArrayDeque::new);
+    private static final ThreadLocal<ReentrantLock> HELD_MESH_BUILD_LOCK = new ThreadLocal<>();
 
     private static volatile Snapshot snapshot = Snapshot.empty();
 
@@ -619,6 +620,25 @@ public final class ZoneVoxelOverlay {
     private static ReentrantLock lockForKey(long key) {
         long mixed = key ^ (key >>> 32);
         return UPDATE_LOCKS[(int) mixed & (UPDATE_LOCKS.length - 1)];
+    }
+
+    /** Serializes mesh reads with synthetic section mutations for the same Voxy section. */
+    public static void lockMeshBuild(WorldSection section) {
+        if (HELD_MESH_BUILD_LOCK.get() != null) {
+            throw new IllegalStateException("A Voxy mesh-build lock is already held on this thread");
+        }
+        ReentrantLock lock = lockForKey(section.key);
+        lock.lock();
+        HELD_MESH_BUILD_LOCK.set(lock);
+    }
+
+    /** Releases the mesh-build lock after Voxy has submitted the generated geometry result. */
+    public static void unlockMeshBuild() {
+        ReentrantLock lock = HELD_MESH_BUILD_LOCK.get();
+        if (lock != null) {
+            HELD_MESH_BUILD_LOCK.remove();
+            lock.unlock();
+        }
     }
 
     /** Serializes our section mutations with Voxy's normal ingestion updates. */
