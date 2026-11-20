@@ -14,10 +14,11 @@ public abstract class RenderDataFactoryMixin {
     private static void voxyexclude$preserveSyntheticMarker(
             int modelId, long state, long metadata, CallbackInfoReturnable<Long> cir
     ) {
-        if ((Mapper.getBiomeId(state) & ZoneVoxelOverlay.SYNTHETIC_BIOME_MARKER) != 0) {
+        if ((state & ZoneVoxelOverlay.SYNTHETIC_VOXEL_MARKER) != 0) {
             // The normal packer strips biome data for models without biome tinting.
-            // Reinsert the marker in bit 8 of the 9-bit biome field for every model.
-            cir.setReturnValue(cir.getReturnValue() | (1L << 54));
+            // Bit 42 is unused in Voxy's packed quad format (model ID ends at bit 41,
+            // biome tint begins at bit 46). Keep the marker out of biome tint data.
+            cir.setReturnValue(cir.getReturnValue() | (1L << 42));
         }
     }
 }
