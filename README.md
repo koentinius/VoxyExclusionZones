@@ -5,9 +5,9 @@ Separate Fabric client addon for Minecraft 1.21.10, targeting Voxy 0.2.6-alpha a
 ## Build on Windows 11
 
 - For Minecraft 1.21.10, double-click `build.bat`.
-- For Minecraft 1.21.11, double-click `build-1.21.11.bat`. This selects Yarn `1.21.11+build.3`, Fabric API `0.141.5+1.21.11`, Voxy `0.2.8-alpha`, and Sodium `0.8.2`.
+- For Minecraft 1.21.11, double-click `build-1.21.11.bat`. This selects Yarn `1.21.11+build.3`, Fabric API `0.141.5+1.21.11`, Voxy `0.2.13-alpha`, and Sodium `0.8.7`.
 
-The 1.21.11 launcher is a separate dependency/build target (Fabric Loom 1.14.8 and Gradle 9.2.1, Voxy 0.2.8-alpha, and Sodium 0.8.2 for Fabric). A CI workflow now compiles both targets. It is not yet a verified runtime port: the Voxy shader and renderer Mixin targets must still be checked against that exact Voxy build and tested in-game.
+The 1.21.11 launcher is a separate dependency/build target (Fabric Loom 1.14.8 and Gradle 9.2.1, Voxy 0.2.13-alpha, and Sodium 0.8.7 for Fabric). A CI workflow now compiles both targets. It is not yet a verified runtime port: the Voxy shader and renderer Mixin targets must still be checked against that exact Voxy build and tested in-game.
 
 You do **not** need to install Gradle manually.
 
