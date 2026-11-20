@@ -75,6 +75,50 @@ public abstract class MDICSectionRendererMixin {
         this.voxyexclude$restoreZones();
     }
 
+    @Inject(
+            method = "renderTerrain",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lorg/lwjgl/opengl/ARBIndirectParameters;glMultiDrawElementsIndirectCountARB(IIJJII)V"
+            ),
+            remap = false
+    )
+    private void voxyexclude$disableDepthForOpaqueDiagnostic(
+            MDICViewport viewport, long indirectOffset, long drawCountOffset, int maxDrawCount,
+            CallbackInfo ci
+    ) {
+        org.lwjgl.opengl.GL11.glDisable(org.lwjgl.opengl.GL11.GL_DEPTH_TEST);
+    }
+
+    @Inject(method = "renderTerrain", at = @At("RETURN"), remap = false)
+    private void voxyexclude$restoreOpaqueDepthDiagnostic(
+            MDICViewport viewport, long indirectOffset, long drawCountOffset, int maxDrawCount,
+            CallbackInfo ci
+    ) {
+        org.lwjgl.opengl.GL11.glEnable(org.lwjgl.opengl.GL11.GL_DEPTH_TEST);
+    }
+
+    @Inject(
+            method = "renderTranslucent",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lorg/lwjgl/opengl/ARBIndirectParameters;glMultiDrawElementsIndirectCountARB(IIJJII)V"
+            ),
+            remap = false
+    )
+    private void voxyexclude$disableDepthForTranslucentDiagnostic(
+            MDICViewport viewport, CallbackInfo ci
+    ) {
+        org.lwjgl.opengl.GL11.glDisable(org.lwjgl.opengl.GL11.GL_DEPTH_TEST);
+    }
+
+    @Inject(method = "renderTranslucent", at = @At("RETURN"), remap = false)
+    private void voxyexclude$restoreTranslucentDepthDiagnostic(
+            MDICViewport viewport, CallbackInfo ci
+    ) {
+        org.lwjgl.opengl.GL11.glEnable(org.lwjgl.opengl.GL11.GL_DEPTH_TEST);
+    }
+
     @Inject(method = "free", at = @At("HEAD"), remap = false)
     private void voxyexclude$freeZoneBuffer(CallbackInfo ci) {
         if (this.voxyexclude$zoneSsbo != null) {
