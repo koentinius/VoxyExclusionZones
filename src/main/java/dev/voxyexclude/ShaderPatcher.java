@@ -5,7 +5,7 @@ public final class ShaderPatcher {
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
 
     private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V2";
-    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V3";
+    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V4";
 
     private static final String VERTEX_DECLARATION = """
         // VOXY_EXCLUSION_ZONES_VERTEX_V2
@@ -145,10 +145,6 @@ public final class ShaderPatcher {
                 + "        return;\n"
                 + "    }\n");
 
-        String depthTest = "if (DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
-        String replacementDepthTest = "if (voxyExcludeSynthetic == 0u && DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
-        requireOnce(source, depthTest, "Voxy LOD depth-texture test");
-        source = source.replace(depthTest, replacementDepthTest);
         return source;
     }
 
