@@ -143,7 +143,7 @@ public final class ZoneVoxelOverlay {
             if (engine != null && !current.zones.isEmpty()) {
                 queueZones(current.zones, current.bottomY, false);
                 pendingTargetSnapshot = current;
-                } else {
+            } else {
                 appliedSnapshot = current;
             }
             return;
