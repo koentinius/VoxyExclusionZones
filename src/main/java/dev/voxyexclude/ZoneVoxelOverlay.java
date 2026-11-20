@@ -40,10 +40,6 @@ public final class ZoneVoxelOverlay {
             ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> CLEAR_ON_RETURN =
             ThreadLocal.withInitial(() -> false);
-    private static final ThreadLocal<Integer> WORLD_UPDATE_DEPTH =
-            ThreadLocal.withInitial(() -> 0);
-    private static final ThreadLocal<Boolean> SUPPRESS_ACQUIRE_OVERLAY =
-            ThreadLocal.withInitial(() -> false);
     private static final ReentrantLock[] UPDATE_LOCKS = createUpdateLocks();
     private static final ThreadLocal<ArrayDeque<ReentrantLock>> HELD_UPDATE_LOCKS =
             ThreadLocal.withInitial(ArrayDeque::new);
@@ -224,12 +220,7 @@ public final class ZoneVoxelOverlay {
         updateLock.lock();
         WorldSection worldSection = null;
         try {
-            SUPPRESS_ACQUIRE_OVERLAY.set(true);
-            try {
-                worldSection = engine.acquire(key);
-            } finally {
-                SUPPRESS_ACQUIRE_OVERLAY.remove();
-            }
+            worldSection = engine.acquire(key);
             long[] raw = worldSection._unsafeGetRawDataArray();
             long[] previousData = restoreFromStorage ? raw.clone() : null;
 
@@ -267,126 +258,6 @@ public final class ZoneVoxelOverlay {
         }
     }
 
-    /** Re-applies transient zone data whenever Voxy reloads a section from its cache/storage. */
-    public static void onSectionAcquired(WorldEngine engine, WorldSection section) {
-        if (section == null || SUPPRESS_ACQUIRE_OVERLAY.get()
-                || WORLD_UPDATE_DEPTH.get() != 0 || SUPPRESS_SAVE.get()) return;
-
-        Snapshot current = snapshot;
-        if (current.world == null || current.zones.isEmpty()
-                || !engine.isLive() || section.lvl > WorldEngine.MAX_LOD_LAYER) return;
-
-        ReentrantLock updateLock = lockForKey(section.key);
-        updateLock.lock();
-        try {
-            if (section.lvl == 0) {
-                long[] raw = section._unsafeGetRawDataArray();
-                int baseX = section.x << 1;
-                int baseY = section.y << 1;
-                int baseZ = section.z << 1;
-                Mapper mapper = engine.getMapper();
-
-                for (int subY = 0; subY < 2; subY++) {
-                    for (int subZ = 0; subZ < 2; subZ++) {
-                        for (int subX = 0; subX < 2; subX++) {
-                            VoxelizedSection voxelized = VoxelizedSection.createEmpty()
-                                    .setPosition(baseX + subX, baseY + subY, baseZ + subZ);
-                            copySubSection(raw, voxelized, subX, subY, subZ, null);
-                            if (!applyZones(voxelized, current, mapper)) continue;
-                            voxelized.lvl0NonAirCount = countNonAir(voxelized.section);
-                            mipSection(voxelized, mapper);
-                            insertWithoutSaving(engine, voxelized);
-                        }
-                    }
-                }
-            } else {
-                applyCoarseZones(engine, section, current);
-            }
-        } finally {
-            updateLock.unlock();
-        }
-    }
-
-    private static void applyCoarseZones(WorldEngine engine, WorldSection section, Snapshot current) {
-        int level = section.lvl;
-        int scale = 1 << level;
-        long minX = ((long) section.x) << (5 + level);
-        long minY = ((long) section.y) << (5 + level);
-        long minZ = ((long) section.z) << (5 + level);
-        long maxX = minX + 32L * scale;
-        long maxY = minY + 32L * scale;
-        long maxZ = minZ + 32L * scale;
-
-        Mapper mapper = engine.getMapper();
-        int[] replacementBlockIds = new int[current.zones.size()];
-        long[] fallbackIds = new long[current.zones.size()];
-        boolean[] intersects = new boolean[current.zones.size()];
-        boolean anyIntersect = false;
-        for (int i = 0; i < current.zones.size(); i++) {
-            ZoneData zoneData = current.zones.get(i);
-            Zone zone = zoneData.zone;
-            if (maxY <= current.bottomY || minY >= zone.surfaceY()
-                    || !intersectsHorizontalBounds(minX, minZ, maxX, maxZ, zone)) continue;
-            replacementBlockIds[i] = mapper.getIdForBlockState(zoneData.state);
-            fallbackIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
-            intersects[i] = true;
-            anyIntersect = true;
-        }
-        if (!anyIntersect) return;
-
-        long[] data = section._unsafeGetRawDataArray();
-        boolean changed = false;
-        for (int y = 0; y < 32; y++) {
-            double blockCenterY = minY + (y + 0.5) * scale;
-            if (blockCenterY < current.bottomY) continue;
-            for (int z = 0; z < 32; z++) {
-                double blockCenterZ = minZ + (z + 0.5) * scale;
-                for (int x = 0; x < 32; x++) {
-                    double blockCenterX = minX + (x + 0.5) * scale;
-                    int index = WorldSection.getIndex(x, y, z);
-                    long original = data[index];
-                    long replacement = original;
-
-                    for (int i = 0; i < current.zones.size(); i++) {
-                        Zone zone = current.zones.get(i).zone;
-                        if (intersects[i] && blockCenterY < zone.surfaceY()
-                                && containsPoint(zone, blockCenterX, blockCenterZ)) {
-                            replacement = Mapper.isAir(original)
-                                    ? fallbackIds[i] : withBlockPreservingMetadata(original, replacementBlockIds[i]);
-                        }
-                    }
-
-                    if (data[index] != replacement) {
-                        data[index] = replacement;
-                        changed = true;
-                    }
-                }
-            }
-        }
-
-        if (changed) {
-            engine.markDirty(section,
-                    WorldEngine.UPDATE_TYPE_BLOCK_BIT | WorldEngine.UPDATE_TYPE_DONT_SAVE,
-                    0b11_11_11);
-        }
-    }
-
-    private static boolean intersectsHorizontalBounds(
-            long minX, long minZ, long maxX, long maxZ, Zone zone
-    ) {
-        if (zone.type() == Zone.Type.SQUARE) {
-            return maxX > zone.centerX() - zone.size()
-                    && minX < zone.centerX() + zone.size()
-                    && maxZ > zone.centerZ() - zone.size()
-                    && minZ < zone.centerZ() + zone.size();
-        }
-        double closestX = Math.max(minX, Math.min(zone.centerX(), maxX));
-        double closestZ = Math.max(minZ, Math.min(zone.centerZ(), maxZ));
-        double dx = closestX - zone.centerX();
-        double dz = closestZ - zone.centerZ();
-        return dx * dx + dz * dz <= (double) zone.size() * zone.size();
-    }
-
     private static boolean containsPoint(Zone zone, double x, double z) {
         double dx = x - zone.centerX();
         double dz = z - zone.centerZ();
@@ -394,16 +265,6 @@ public final class ZoneVoxelOverlay {
             return dx * dx + dz * dz <= (double) zone.size() * zone.size();
         }
         return Math.abs(dx) <= zone.size() && Math.abs(dz) <= zone.size();
-    }
-
-    public static void beginWorldUpdate() {
-        WORLD_UPDATE_DEPTH.set(WORLD_UPDATE_DEPTH.get() + 1);
-    }
-
-    public static void endWorldUpdate() {
-        int depth = WORLD_UPDATE_DEPTH.get();
-        if (depth <= 1) WORLD_UPDATE_DEPTH.remove();
-        else WORLD_UPDATE_DEPTH.set(depth - 1);
     }
 
     private static boolean copySubSection(
