@@ -24,6 +24,7 @@ public abstract class WorldUpdaterMixin {
             WorldEngine engine, VoxelizedSection section, CallbackInfo ci
     ) {
         ZoneVoxelOverlay.endIngest();
+        ZoneVoxelOverlay.diagnoseParentLods(engine, section);
         ZoneVoxelOverlay.unlockUpdate();
     }
 }
