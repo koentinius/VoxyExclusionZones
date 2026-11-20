@@ -3,9 +3,11 @@ package dev.voxyexclude;
 public final class ShaderPatcher {
     public static final String VERTEX_SHADER = "voxy:lod/gl46/quads3.vert";
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
+    public static final String COMMAND_GENERATION_SHADER = "voxy:lod/gl46/cmdgen.comp";
 
     private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V2";
     private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V7";
+    private static final String COMMAND_GENERATION_MARKER = "VOXY_EXCLUSION_ZONES_FORCE_VISIBLE_DIAGNOSTIC_V1";
 
     private static final String VERTEX_DECLARATION = """
         // VOXY_EXCLUSION_ZONES_VERTEX_V2
@@ -170,6 +172,23 @@ public final class ShaderPatcher {
                     "Voxy exclusion shader patch: unsupported minimum-depth texture test");
         }
         return source;
+    }
+
+    /**
+     * Diagnostic only: force every section in Voxy's current render list through
+     * command generation, bypassing the visibility buffer entirely. This is
+     * intentionally global and may cause substantial overdraw/performance loss.
+     */
+    private static String patchCommandGeneration(String source) {
+        if (source.contains(COMMAND_GENERATION_MARKER)) {
+            return source;
+        }
+
+        String anchor = "bool shouldRender = (dat&0x7fffffffu) == frameId;";
+        requireOnce(source, anchor, "section visibility-buffer test");
+        return source.replace(anchor,
+                "// " + COMMAND_GENERATION_MARKER + "\\n"
+                + "bool shouldRender = true;");
     }
 
     private static void requireOnce(String source, String anchor, String description) {
