@@ -14,7 +14,7 @@ public abstract class RenderDataFactoryMixin {
     private static void voxyexclude$preserveSyntheticMarker(
             int modelId, long state, long metadata, CallbackInfoReturnable<Long> cir
     ) {
-        if (Mapper.getBiomeId(state) == ZoneVoxelOverlay.SYNTHETIC_BIOME_ID) {
+        if ((Mapper.getBiomeId(state) & ZoneVoxelOverlay.SYNTHETIC_BIOME_MARKER) != 0) {
             // The normal packer strips biome data for models without biome tinting.
             // Reinsert the marker in bit 8 of the 9-bit biome field for every model.
             cir.setReturnValue(cir.getReturnValue() | (1L << 54));
