@@ -16,7 +16,7 @@ public final class ShaderPatcher {
 
     private static final String VERTEX_POSITION = """
             // Carry the synthetic marker and exact interpolated block-space position to the fragment shader.
-            voxyExcludeSynthetic = uint(extractBiomeId(quadData[uint(gl_VertexID)>>2]) == 256u);
+            voxyExcludeSynthetic = uint((extractBiomeId(quadData[uint(gl_VertexID)>>2]) & 256u) != 0u);
             vec2 voxyExcludeCornerMask = vec2((cornerId >> 1) & 1u, cornerId & 1u) * quad.lodScale;
             voxyExcludeWorldPos = quad.basePoint
                 + swizzelDataAxis(quad.axis, vec3(quad.quadSizeAddin * voxyExcludeCornerMask, 0.0));
