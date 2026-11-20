@@ -7,7 +7,7 @@ import net.minecraft.util.Identifier;
 /** Version-specific textured layer factory for the block atlas. */
 final class ZoneSurfaceLayer {
     private ZoneSurfaceLayer() {}
-    static RenderLayer get(Identifier atlas) {
-        return RenderLayers.entityTranslucent(atlas);
+    static RenderLayer get(Identifier atlas, boolean translucent) {
+        return translucent ? RenderLayers.entityTranslucent(atlas) : RenderLayers.entitySolid(atlas);
     }
 }
