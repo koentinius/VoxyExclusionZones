@@ -19,7 +19,7 @@ public final class ZoneSurfaceRenderer {
     private ZoneSurfaceRenderer() {}
 
     public static void register() {
-        WorldRenderEvents.BEFORE_ENTITIES.register(ZoneSurfaceRenderer::render);
+        WorldRenderEvents.AFTER_ENTITIES.register(ZoneSurfaceRenderer::render);
     }
 
     private static void render(WorldRenderContext context) {
