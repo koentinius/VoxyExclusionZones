@@ -2,7 +2,7 @@ package dev.voxyexclude;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.world.WorldSavePath;
+import net.minecraft.util.WorldSavePath;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
