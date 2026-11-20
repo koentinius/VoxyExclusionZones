@@ -125,7 +125,7 @@ public final class ZoneSurfaceRenderer {
         }
         return switch (material) {
             case WATER -> withAlpha(BiomeColors.getWaterColor(world, pos), 210);
-            case GRASS -> BiomeColors.getGrassColor(world, pos);
+            case GRASS -> withAlpha(BiomeColors.getGrassColor(world, pos), 255);
             case SAND -> 0xFFFFFFFF;
         };
     }
