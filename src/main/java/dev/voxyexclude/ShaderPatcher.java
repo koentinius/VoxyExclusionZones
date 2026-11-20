@@ -171,13 +171,13 @@ public final class ShaderPatcher {
                     "Voxy exclusion shader patch: unsupported minimum-depth texture test");
         }
 
-        // Diagnostic: color synthetic fragments magenta after Voxy's own
-        // minimum-depth test but before its texture-alpha discard.
-        String alphaAnchor = "    //Also, small quad is really";
-        requireOnce(source, alphaAnchor, "fragment alpha-discard section");
-        source = source.replace(alphaAnchor,
+        // Diagnostic: color synthetic fragments magenta after Voxy's depth
+        // and alpha tests, immediately before its final output path.
+        String outputAnchor = "    #ifndef PATCHED_SHADER\n    colour = computeColour(texPos, colour);";
+        requireOnce(source, outputAnchor, "fragment output path");
+        source = source.replace(outputAnchor,
                 "    if (voxyExcludeSynthetic != 0u) colour = vec4(1.0, 0.0, 1.0, 1.0);\n"
-                + alphaAnchor);
+                + outputAnchor);
         return source;
     }
 
