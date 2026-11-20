@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -159,34 +158,81 @@ public final class ZoneVoxelOverlay {
     }
 
     private static void queueZones(List<ZoneData> zones, int bottomY) {
-        Set<Long> unique = new LinkedHashSet<>();
-        int minSectionY = Math.floorDiv(bottomY, SECTION_BLOCK_SIZE);
-
+        List<ZoneSectionCursor> cursors = new ArrayList<>();
         for (ZoneData zoneData : zones) {
-            Zone zone = zoneData.zone;
-            int minX = Math.floorDiv(zone.centerX() - zone.size(), SECTION_BLOCK_SIZE);
-            int maxX = Math.floorDiv(zone.centerX() + zone.size() - 1, SECTION_BLOCK_SIZE);
-            int minZ = Math.floorDiv(zone.centerZ() - zone.size(), SECTION_BLOCK_SIZE);
-            int maxZ = Math.floorDiv(zone.centerZ() + zone.size() - 1, SECTION_BLOCK_SIZE);
-            int maxY = Math.floorDiv(zone.surfaceY() - 1, SECTION_BLOCK_SIZE);
+            ZoneSectionCursor cursor = new ZoneSectionCursor(zoneData.zone, bottomY);
+            if (!cursor.done) cursors.add(cursor);
+        }
 
-            for (int sy = minSectionY; sy <= maxY; sy++) {
-                for (int sz = minZ; sz <= maxZ; sz++) {
-                    for (int sx = minX; sx <= maxX; sx++) {
-                        if (!intersectsHorizontalSection(sx, sz, zone)) continue;
-                        unique.add(WorldEngine.getWorldSectionId(0, sx, sy, sz));
-                        if (unique.size() >= MAX_QUEUED_SECTIONS) break;
-                    }
-                    if (unique.size() >= MAX_QUEUED_SECTIONS) break;
-                }
+        // Round-robin zones so one large nearby zone cannot monopolize the
+        // bounded queue and leave every later zone untouched.
+        Set<Long> unique = new LinkedHashSet<>();
+        boolean madeProgress;
+        do {
+            madeProgress = false;
+            for (ZoneSectionCursor cursor : cursors) {
+                Long key = cursor.next();
+                if (key == null) continue;
+                unique.add(key);
+                madeProgress = true;
                 if (unique.size() >= MAX_QUEUED_SECTIONS) break;
             }
-            if (unique.size() >= MAX_QUEUED_SECTIONS) break;
-        }
+        } while (madeProgress && unique.size() < MAX_QUEUED_SECTIONS);
 
         pendingSections.addAll(unique);
     }
 
+    private static final class ZoneSectionCursor {
+        private final Zone zone;
+        private final int minX;
+        private final int maxX;
+        private final int minZ;
+        private final int maxZ;
+        private final int maxY;
+        private int x;
+        private int z;
+        private int y;
+        private boolean done;
+
+        private ZoneSectionCursor(Zone zone, int bottomY) {
+            this.zone = zone;
+            this.minX = Math.floorDiv(zone.centerX() - zone.size(), SECTION_BLOCK_SIZE);
+            this.maxX = Math.floorDiv(zone.centerX() + zone.size() - 1, SECTION_BLOCK_SIZE);
+            this.minZ = Math.floorDiv(zone.centerZ() - zone.size(), SECTION_BLOCK_SIZE);
+            this.maxZ = Math.floorDiv(zone.centerZ() + zone.size() - 1, SECTION_BLOCK_SIZE);
+            this.y = Math.floorDiv(bottomY, SECTION_BLOCK_SIZE);
+            this.maxY = Math.floorDiv(zone.surfaceY() - 1, SECTION_BLOCK_SIZE);
+            this.x = minX;
+            this.z = minZ;
+            this.done = zone.surfaceY() <= bottomY || maxY < y;
+        }
+
+        private Long next() {
+            while (!done) {
+                int currentX = x;
+                int currentY = y;
+                int currentZ = z;
+                advance();
+                if (intersectsHorizontalSection(currentX, currentZ, zone)) {
+                    return WorldEngine.getWorldSectionId(0, currentX, currentY, currentZ);
+                }
+            }
+            return null;
+        }
+
+        private void advance() {
+            x++;
+            if (x > maxX) {
+                x = minX;
+                z++;
+                if (z > maxZ) {
+                    z = minZ;
+                    y++;
+                    if (y > maxY) done = true;
+                }
+            }
+        }
+    }
     private static boolean intersectsHorizontalSection(int sectionX, int sectionZ, Zone zone) {
         double minX = sectionX * (double) SECTION_BLOCK_SIZE;
         double minZ = sectionZ * (double) SECTION_BLOCK_SIZE;
