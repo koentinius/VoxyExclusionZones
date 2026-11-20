@@ -71,7 +71,7 @@ public final class ZoneSurfaceRenderer {
                 Sprite sprite = spriteFor(client, zone.surfaceMaterial());
                 if (sprite == null) continue;
 
-                RenderLayer layer = ZoneSurfaceLayer.get(BLOCK_ATLAS);
+                RenderLayer layer = ZoneSurfaceLayer.get(BLOCK_ATLAS, zone.surfaceMaterial() == Zone.SurfaceMaterial.WATER);
                 VertexConsumer base = context.consumers().getBuffer(layer);
                 VertexConsumer vertices = sprite.getTextureSpecificVertexConsumer(base);
 
