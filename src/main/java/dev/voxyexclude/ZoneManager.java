@@ -10,7 +10,7 @@ import java.util.*;
 public final class ZoneManager {
     private static final int CONFIG_VERSION = 2;
     private static final Path LEGACY_CONFIG_FILE = FabricLoader.getInstance().getConfigDir().resolve("voxy-exclusion-zones.json");
-    private static Path configFile = LEGACY_configFile;
+    private static Path configFile = LEGACY_CONFIG_FILE;
     private static boolean legacyMigrationConsidered;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Object LOCK = new Object();
