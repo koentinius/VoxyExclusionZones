@@ -112,6 +112,9 @@ public final class ShaderPatcher {
         if (FRAGMENT_SHADER.equals(id)) {
             return patchFragment(source);
         }
+        if (COMMAND_GENERATION_SHADER.equals(id)) {
+            return patchCommandGeneration(source);
+        }
         return source;
     }
 
