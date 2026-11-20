@@ -105,6 +105,7 @@ public final class ZoneVoxelOverlay {
 
     private static Snapshot buildSnapshot(ClientWorld world, ZoneManager.EnabledSnapshot config) {
         int bottomY = world.getBottomY();
+        int topY = world.getTopY();
         List<ZoneData> prepared = new ArrayList<>();
         for (Zone zone : config.zones()) {
             if (!zone.surfaceEnabled() || zone.surfaceY() <= bottomY) continue;
@@ -127,7 +128,7 @@ public final class ZoneVoxelOverlay {
             prepared.add(new ZoneData(zone, state, biome, (byte) (sky | (block << 4))));
         }
 
-        return new Snapshot(world, config.revision(), bottomY, List.copyOf(prepared));
+        return new Snapshot(world, config.revision(), bottomY, topY, List.copyOf(prepared));
     }
 
     private static void syncEngine(MinecraftClient client, Snapshot previous, Snapshot current) {
@@ -139,7 +140,7 @@ public final class ZoneVoxelOverlay {
             appliedSnapshot = Snapshot.empty();
             pendingTargetSnapshot = null;
             if (engine != null && !current.zones.isEmpty()) {
-                queueZones(current.zones, current.bottomY, false);
+                queueZones(current.zones, current.bottomY, current.topY, false);
                 pendingTargetSnapshot = current;
             } else {
                 appliedSnapshot = current;
@@ -158,7 +159,7 @@ public final class ZoneVoxelOverlay {
         if (pendingTargetSnapshot != null) zonesToRefresh.addAll(pendingTargetSnapshot.zones);
         zonesToRefresh.addAll(current.zones);
 
-        queueZones(List.copyOf(zonesToRefresh), current.bottomY, true);
+        queueZones(List.copyOf(zonesToRefresh), current.bottomY, current.topY, true);
         pendingTargetSnapshot = current;
         if (pendingSections.isEmpty()) {
             appliedSnapshot = current;
@@ -166,10 +167,10 @@ public final class ZoneVoxelOverlay {
         }
     }
 
-    private static void queueZones(List<ZoneData> zones, int bottomY, boolean restoreFromStorage) {
+    private static void queueZones(List<ZoneData> zones, int bottomY, int topY, boolean restoreFromStorage) {
         List<ZoneSectionCursor> cursors = new ArrayList<>();
         for (ZoneData zoneData : zones) {
-            ZoneSectionCursor cursor = new ZoneSectionCursor(zoneData.zone, bottomY);
+            ZoneSectionCursor cursor = new ZoneSectionCursor(zoneData.zone, bottomY, topY);
             if (!cursor.done) cursors.add(cursor);
         }
 
@@ -203,7 +204,7 @@ public final class ZoneVoxelOverlay {
         private int y;
         private boolean done;
 
-        private ZoneSectionCursor(Zone zone, int bottomY) {
+        private ZoneSectionCursor(Zone zone, int bottomY, int topY) {
             this.zone = zone;
             this.minX = Math.floorDiv(zone.centerX() - zone.size(), SECTION_BLOCK_SIZE);
             this.maxX = Math.floorDiv(zone.centerX() + zone.size() - 1, SECTION_BLOCK_SIZE);
@@ -211,12 +212,13 @@ public final class ZoneVoxelOverlay {
             this.maxZ = Math.floorDiv(zone.centerZ() + zone.size() - 1, SECTION_BLOCK_SIZE);
             int fillBottomY = Math.max(bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
             this.minY = Math.floorDiv(fillBottomY, SECTION_BLOCK_SIZE);
-            // Include the section containing the surface block so the replacement's
-            // upward face can be generated against synthetic air above it.
-            this.y = Math.floorDiv(zone.surfaceY(), SECTION_BLOCK_SIZE);
+            // Refresh every section from the dimension's sky limit down through
+            // the replacement layer. Sections above the surface must be rewritten
+            // as air too, otherwise their previously ingested LOD remains visible.
+            this.y = Math.floorDiv(topY - 1, SECTION_BLOCK_SIZE);
             this.x = minX;
             this.z = minZ;
-            this.done = zone.surfaceY() <= bottomY || y < minY;
+            this.done = zone.surfaceY() <= bottomY || topY <= bottomY || y < minY;
         }
 
         private Long next() {
@@ -496,10 +498,12 @@ public final class ZoneVoxelOverlay {
             ZoneData zoneData = current.zones.get(i);
             Zone zone = zoneData.zone;
             int zoneBottomY = Math.max(current.bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
-            int fillMinY = Math.max(zoneBottomY, sectionMinY);
-            int fillMaxY = Math.min(sectionMaxY, zone.surfaceY());
-            boolean containsSurfaceBlock = sectionMinY <= zone.surfaceY() && sectionMaxY > zone.surfaceY();
-            if ((fillMinY >= fillMaxY && !containsSurfaceBlock)
+            // A section intersects the overlay if it contains any part of either
+            // the 30-block replacement layer or the air volume above the surface.
+            int affectedMinY = Math.max(sectionMinY, current.bottomY);
+            int affectedMaxY = Math.min(sectionMaxY, current.topY);
+            if ((affectedMinY >= affectedMaxY
+                    || affectedMaxY <= zoneBottomY)
                     || !intersectsHorizontalSection16(sectionMinX, sectionMinZ, zone)) {
                 continue;
             }
@@ -827,9 +831,9 @@ public final class ZoneVoxelOverlay {
     private record SectionWork(long key, boolean restoreFromStorage) {}
     private record QueuedIngestWork(WorldEngine engine, Runnable task) {}
     private record ZoneData(Zone zone, BlockState state, RegistryEntry<Biome> biome, byte light) {}
-    private record Snapshot(ClientWorld world, long revision, int bottomY, List<ZoneData> zones) {
+    private record Snapshot(ClientWorld world, long revision, int bottomY, int topY, List<ZoneData> zones) {
         private static Snapshot empty() {
-            return new Snapshot(null, -1, 0, List.of());
+            return new Snapshot(null, -1, 0, 0, List.of());
         }
     }
 }
