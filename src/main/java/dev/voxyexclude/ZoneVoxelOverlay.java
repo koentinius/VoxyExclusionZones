@@ -20,10 +20,10 @@ import net.minecraft.world.biome.Biome;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Applies replacement voxel data before Voxy builds its normal section meshes.
@@ -41,6 +41,9 @@ public final class ZoneVoxelOverlay {
             ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> CLEAR_ON_RETURN =
             ThreadLocal.withInitial(() -> false);
+    private static final ReentrantLock[] UPDATE_LOCKS = createUpdateLocks();
+    private static final ThreadLocal<ArrayDeque<ReentrantLock>> HELD_UPDATE_LOCKS =
+            ThreadLocal.withInitial(ArrayDeque::new);
 
     private static volatile Snapshot snapshot = Snapshot.empty();
 
@@ -49,7 +52,6 @@ public final class ZoneVoxelOverlay {
     private static Snapshot pendingTargetSnapshot;
     private static boolean pendingRestore;
     private static final ArrayDeque<Long> pendingSections = new ArrayDeque<>();
-    private static final Set<Long> pendingSectionSet = new HashSet<>();
 
     private ZoneVoxelOverlay() {}
 
@@ -179,7 +181,6 @@ public final class ZoneVoxelOverlay {
         }
 
         pendingSections.addAll(unique);
-        pendingSectionSet.addAll(unique);
     }
 
     private static boolean intersectsHorizontalSection(int sectionX, int sectionZ, Zone zone) {
@@ -207,7 +208,6 @@ public final class ZoneVoxelOverlay {
 
         for (int i = 0; i < SECTIONS_PER_TICK && !pendingSections.isEmpty(); i++) {
             long key = pendingSections.removeFirst();
-            pendingSectionSet.remove(key);
             processSection(engine, key, pendingRestore);
         }
 
@@ -219,8 +219,11 @@ public final class ZoneVoxelOverlay {
     }
 
     private static void processSection(WorldEngine engine, long key, boolean restoreFromStorage) {
-        WorldSection worldSection = engine.acquire(key);
+        ReentrantLock updateLock = lockForKey(key);
+        updateLock.lock();
+        WorldSection worldSection = null;
         try {
+            worldSection = engine.acquire(key);
             long[] raw = worldSection._unsafeGetRawDataArray();
             long[] previousData = restoreFromStorage ? raw.clone() : null;
 
@@ -253,7 +256,8 @@ public final class ZoneVoxelOverlay {
                 }
             }
         } finally {
-            worldSection.release();
+            if (worldSection != null) worldSection.release();
+            updateLock.unlock();
         }
     }
 
@@ -376,9 +380,34 @@ public final class ZoneVoxelOverlay {
         }
     }
 
+    private static ReentrantLock[] createUpdateLocks() {
+        ReentrantLock[] locks = new ReentrantLock[256];
+        for (int i = 0; i < locks.length; i++) locks[i] = new ReentrantLock();
+        return locks;
+    }
+
+    private static ReentrantLock lockForKey(long key) {
+        long mixed = key ^ (key >>> 32);
+        return UPDATE_LOCKS[(int) mixed & (UPDATE_LOCKS.length - 1)];
+    }
+
+    /** Serializes our section mutations with Voxy's normal ingestion updates. */
+    public static void lockUpdate(VoxelizedSection section) {
+        long key = WorldEngine.getWorldSectionId(0, section.x >> 1, section.y >> 1, section.z >> 1);
+        ReentrantLock lock = lockForKey(key);
+        lock.lock();
+        HELD_UPDATE_LOCKS.get().push(lock);
+    }
+
+    public static void unlockUpdate() {
+        ArrayDeque<ReentrantLock> held = HELD_UPDATE_LOCKS.get();
+        if (held.isEmpty()) throw new IllegalStateException("No Voxy section update lock held");
+        held.pop().unlock();
+        if (held.isEmpty()) HELD_UPDATE_LOCKS.remove();
+    }
+
     private static void clearPending() {
         pendingSections.clear();
-        pendingSectionSet.clear();
         pendingTargetSnapshot = null;
         pendingRestore = false;
     }
