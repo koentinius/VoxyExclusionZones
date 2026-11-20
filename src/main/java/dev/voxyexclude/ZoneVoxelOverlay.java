@@ -50,6 +50,8 @@ public final class ZoneVoxelOverlay {
     private static final ReentrantLock[] UPDATE_LOCKS = createUpdateLocks();
     private static final ThreadLocal<ArrayDeque<ReentrantLock>> HELD_UPDATE_LOCKS =
             ThreadLocal.withInitial(ArrayDeque::new);
+    private static final ThreadLocal<ArrayDeque<Integer>> HELD_UPDATE_LOCK_COUNTS =
+            ThreadLocal.withInitial(ArrayDeque::new);
     private static final ThreadLocal<ReentrantLock> HELD_MESH_BUILD_LOCK = new ThreadLocal<>();
 
     private static volatile Snapshot snapshot = Snapshot.empty();
@@ -617,9 +619,13 @@ public final class ZoneVoxelOverlay {
         return locks;
     }
 
-    private static ReentrantLock lockForKey(long key) {
+    private static int lockIndexForKey(long key) {
         long mixed = key ^ (key >>> 32);
-        return UPDATE_LOCKS[(int) mixed & (UPDATE_LOCKS.length - 1)];
+        return (int) mixed & (UPDATE_LOCKS.length - 1);
+    }
+
+    private static ReentrantLock lockForKey(long key) {
+        return UPDATE_LOCKS[lockIndexForKey(key)];
     }
 
     /** Serializes mesh reads with synthetic section mutations for the same Voxy section. */
@@ -643,17 +649,43 @@ public final class ZoneVoxelOverlay {
 
     /** Serializes our section mutations with Voxy's normal ingestion updates. */
     public static void lockUpdate(VoxelizedSection section) {
-        long key = WorldEngine.getWorldSectionId(0, section.x >> 1, section.y >> 1, section.z >> 1);
-        ReentrantLock lock = lockForKey(key);
-        lock.lock();
-        HELD_UPDATE_LOCKS.get().push(lock);
+        // WorldUpdater propagates this source section into every parent LOD.
+        // Lock all affected section keys in a stable order so mesh workers at
+        // any LOD cannot observe a partially updated mip chain.
+        boolean[] required = new boolean[UPDATE_LOCKS.length];
+        for (int level = 0; level <= WorldEngine.MAX_LOD_LAYER; level++) {
+            long key = WorldEngine.getWorldSectionId(
+                    level,
+                    section.x >> (level + 1),
+                    section.y >> (level + 1),
+                    section.z >> (level + 1)
+            );
+            required[lockIndexForKey(key)] = true;
+        }
+
+        ArrayDeque<ReentrantLock> held = HELD_UPDATE_LOCKS.get();
+        int count = 0;
+        for (int i = 0; i < required.length; i++) {
+            if (required[i]) {
+                ReentrantLock lock = UPDATE_LOCKS[i];
+                lock.lock();
+                held.push(lock);
+                count++;
+            }
+        }
+        HELD_UPDATE_LOCK_COUNTS.get().push(count);
     }
 
     public static void unlockUpdate() {
         ArrayDeque<ReentrantLock> held = HELD_UPDATE_LOCKS.get();
-        if (held.isEmpty()) throw new IllegalStateException("No Voxy section update lock held");
-        held.pop().unlock();
+        ArrayDeque<Integer> counts = HELD_UPDATE_LOCK_COUNTS.get();
+        if (counts.isEmpty()) throw new IllegalStateException("No Voxy section update lock held");
+        int count = counts.pop();
+        for (int i = 0; i < count; i++) {
+            held.pop().unlock();
+        }
         if (held.isEmpty()) HELD_UPDATE_LOCKS.remove();
+        if (counts.isEmpty()) HELD_UPDATE_LOCK_COUNTS.remove();
     }
 
     private static void clearPending() {
