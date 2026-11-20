@@ -1,7 +1,6 @@
 package dev.voxyexclude.mixin;
 
 import dev.voxyexclude.ZoneVoxelOverlay;
-import me.cortex.voxy.common.world.other.Mapper;
 import me.cortex.voxy.client.core.rendering.building.RenderDataFactory;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
