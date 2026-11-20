@@ -397,8 +397,7 @@ public final class ZoneVoxelOverlay {
         int sectionMaxY = sectionMinY + 16;
         if (sectionMaxY <= current.bottomY) return false;
 
-        int[] replacementBlockIds = new int[current.zones.size()];
-        long[] fallbackIds = new long[current.zones.size()];
+        long[] replacementIds = new long[current.zones.size()];
         boolean[] intersects = new boolean[current.zones.size()];
         boolean anyIntersect = false;
         for (int i = 0; i < current.zones.size(); i++) {
@@ -410,8 +409,10 @@ public final class ZoneVoxelOverlay {
             if (fillMinY >= fillMaxY || !intersectsHorizontalSection16(sectionMinX, sectionMinZ, zone)) {
                 continue;
             }
-            replacementBlockIds[i] = mapper.getIdForBlockState(zoneData.state);
-            fallbackIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
+            // Every voxel in the synthetic volume must use identical material,
+            // light, and biome data. Preserving metadata from the original terrain
+            // creates visible block-shaped shading/biome seams in the replacement.
+            replacementIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
             intersects[i] = true;
             anyIntersect = true;
         }
@@ -434,8 +435,7 @@ public final class ZoneVoxelOverlay {
                         int zoneBottomY = Math.max(current.bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
                         if (intersects[i] && blockY >= zoneBottomY && blockY < zone.surfaceY()
                                 && containsBlock(zone, blockX, blockZ)) {
-                            replacement = Mapper.isAir(original)
-                                    ? fallbackIds[i] : withBlockPreservingMetadata(original, replacementBlockIds[i]);
+                            replacement = replacementIds[i];
                         }
                     }
 
@@ -555,15 +555,6 @@ public final class ZoneVoxelOverlay {
 
     private static int mip3Index(int x, int y, int z) {
         return 4096 + 512 + 64 + (y << 2) + (z << 1) + x;
-    }
-
-    /** Replaces the block ID while retaining the packed light and biome IDs. */
-    private static long withBlockPreservingMetadata(long original, int replacementBlockId) {
-        return Mapper.composeMappingId(
-                (byte) Mapper.getLightId(original),
-                replacementBlockId,
-                Mapper.getBiomeId(original)
-        );
     }
 
     private static int countNonAir(long[] data) {
