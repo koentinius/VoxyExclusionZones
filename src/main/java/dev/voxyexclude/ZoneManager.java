@@ -159,6 +159,14 @@ public final class ZoneManager {
 
     public static Path configPath() { synchronized (LOCK) { return configFile; } }
 
+    public static void unload() {
+        synchronized (LOCK) {
+            ZONES.clear();
+            loaded = false;
+            revision++;
+        }
+    }
+
     public static void switchStorage(Path target) throws IOException {
         Path normalized = target.toAbsolutePath().normalize();
         synchronized (LOCK) {
