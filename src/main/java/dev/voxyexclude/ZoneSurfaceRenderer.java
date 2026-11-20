@@ -26,7 +26,9 @@ public final class ZoneSurfaceRenderer {
     }
 
     private static void render(WorldRenderContext context) {
-        if (context.consumers() == null || context.matrices() == null) {
+        if (context.consumers() == null || context.matrices() == null || context.worldState() == null
+                || context.worldState().cameraRenderState == null
+                || !context.worldState().cameraRenderState.initialized) {
             return;
         }
 
