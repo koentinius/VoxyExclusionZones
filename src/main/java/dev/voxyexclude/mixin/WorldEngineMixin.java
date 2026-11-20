@@ -2,6 +2,7 @@ package dev.voxyexclude.mixin;
 
 import dev.voxyexclude.ZoneVoxelOverlay;
 import me.cortex.voxy.common.world.WorldEngine;
+import me.cortex.voxy.common.world.WorldSection;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
@@ -22,6 +23,7 @@ public abstract class WorldEngineMixin {
                 ? changeState | WorldEngine.UPDATE_TYPE_DONT_SAVE
                 : changeState;
     }
+
     @Inject(method = "acquire(IIII)Lme/cortex/voxy/common/world/WorldSection;", at = @At("RETURN"), remap = false)
     private void voxyexclude$queueAcquiredLevelZeroSection(
             int level, int x, int y, int z, CallbackInfoReturnable<WorldSection> cir
@@ -35,5 +37,4 @@ public abstract class WorldEngineMixin {
     ) {
         ZoneVoxelOverlay.onSectionAcquired((WorldEngine) (Object) this, cir.getReturnValue());
     }
-
 }
