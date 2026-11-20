@@ -503,7 +503,7 @@ public final class ZoneVoxelOverlay {
             for (int z = 0; z < 8; z++) {
                 for (int x = 0; x < 8; x++) {
                     int sx = x << 1, sy = y << 1, sz = z << 1;
-                    data[out++] = Mipper.mip(
+                    data[out++] = mipWithSyntheticPriority(
                             data[voxelIndex(sx, sy, sz)], data[voxelIndex(sx + 1, sy, sz)],
                             data[voxelIndex(sx, sy, sz + 1)], data[voxelIndex(sx + 1, sy, sz + 1)],
                             data[voxelIndex(sx, sy + 1, sz)], data[voxelIndex(sx + 1, sy + 1, sz)],
@@ -520,7 +520,7 @@ public final class ZoneVoxelOverlay {
             for (int z = 0; z < 4; z++) {
                 for (int x = 0; x < 4; x++) {
                     int sx = x << 1, sy = y << 1, sz = z << 1;
-                    data[out++] = Mipper.mip(
+                    data[out++] = mipWithSyntheticPriority(
                             data[mip1Index(sx, sy, sz)], data[mip1Index(sx + 1, sy, sz)],
                             data[mip1Index(sx, sy, sz + 1)], data[mip1Index(sx + 1, sy, sz + 1)],
                             data[mip1Index(sx, sy + 1, sz)], data[mip1Index(sx + 1, sy + 1, sz)],
@@ -537,7 +537,7 @@ public final class ZoneVoxelOverlay {
             for (int z = 0; z < 2; z++) {
                 for (int x = 0; x < 2; x++) {
                     int sx = x << 1, sy = y << 1, sz = z << 1;
-                    data[out++] = Mipper.mip(
+                    data[out++] = mipWithSyntheticPriority(
                             data[mip2Index(sx, sy, sz)], data[mip2Index(sx + 1, sy, sz)],
                             data[mip2Index(sx, sy, sz + 1)], data[mip2Index(sx + 1, sy, sz + 1)],
                             data[mip2Index(sx, sy + 1, sz)], data[mip2Index(sx + 1, sy + 1, sz)],
@@ -549,7 +549,7 @@ public final class ZoneVoxelOverlay {
         }
 
         // 2^3 -> 1^3
-        data[16 * 16 * 16 + 8 * 8 * 8 + 4 * 4 * 4 + 2 * 2 * 2] = Mipper.mip(
+        data[16 * 16 * 16 + 8 * 8 * 8 + 4 * 4 * 4 + 2 * 2 * 2] = mipWithSyntheticPriority(
                 data[mip3Index(0, 0, 0)], data[mip3Index(1, 0, 0)],
                 data[mip3Index(0, 0, 1)], data[mip3Index(1, 0, 1)],
                 data[mip3Index(0, 1, 0)], data[mip3Index(1, 1, 0)],
