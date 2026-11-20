@@ -28,7 +28,6 @@ loom {
 sourceSets {
     main {
         java {
-            exclude 'dev/voxyexclude/mixin/MDICSectionRendererMixin.java'
             srcDir "src/${project.minecraft_version}/java"
         }
     }
