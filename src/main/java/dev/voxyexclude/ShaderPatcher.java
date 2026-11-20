@@ -5,7 +5,7 @@ public final class ShaderPatcher {
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
 
     private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V2";
-    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V4";
+    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V5";
 
     private static final String VERTEX_DECLARATION = """
         // VOXY_EXCLUSION_ZONES_VERTEX_V2
@@ -24,7 +24,7 @@ public final class ShaderPatcher {
         """;
 
     private static final String FRAGMENT_DECLARATION = """
-        // VOXY_EXCLUSION_ZONES_FRAGMENT_V3
+        // VOXY_EXCLUSION_ZONES_FRAGMENT_V5
         layout(location = 2) in vec3 voxyExcludeWorldPos;
         layout(location = 3) flat in uint voxyExcludeSynthetic;
         layout(location = 4) flat in float voxyExcludeLodScale;
@@ -145,6 +145,14 @@ public final class ShaderPatcher {
                 + "        return;\n"
                 + "    }\n");
 
+        // Voxy 0.2.6-alpha rejects fragments behind its minimum-depth texture.
+        // Synthetic replacement faces intentionally occupy the excluded volume,
+        // so bypass only this Voxy-specific rejection for those faces. The normal
+        // OpenGL depth test remains active.
+        String depthTest = "if (gl_FragCoord.z < texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r) {";
+        String replacementDepthTest = "if (voxyExcludeSynthetic == 0u && gl_FragCoord.z < texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r) {";
+        requireOnce(source, depthTest, "Voxy minimum-depth texture test");
+        source = source.replace(depthTest, replacementDepthTest);
         return source;
     }
 
