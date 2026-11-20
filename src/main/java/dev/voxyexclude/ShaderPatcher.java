@@ -193,10 +193,10 @@ public final class ShaderPatcher {
         }
         String anchor = "bool shouldRender = (dat&0x7fffffffu) == frameId;";
         requireOnce(source, anchor, "section visibility-buffer test");
-        return source.replace(anchor, "// " + COMMAND_GENERATION_MARKER + "\\n"
+        return source.replace(anchor, "// " + COMMAND_GENERATION_MARKER + "\n"
                 + "bool shouldRender = true;");
     }
-\n    private static void requireOnce(String source, String anchor, String description) {
+    private static void requireOnce(String source, String anchor, String description) {
         int first = source.indexOf(anchor);
         if (first < 0 || source.indexOf(anchor, first + anchor.length()) >= 0) {
             throw new IllegalStateException("Voxy exclusion shader patch: expected exactly one " + description);
