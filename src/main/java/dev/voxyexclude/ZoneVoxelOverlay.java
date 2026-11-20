@@ -266,10 +266,10 @@ public final class ZoneVoxelOverlay {
     }
 
     /**
-     * Runs synthetic section refreshes asynchronously instead of consuming a
-     * fixed number on the client tick. The actual voxel writes still go through
-     * Voxy's WorldUpdater.insertUpdate path, which dirties and rebuilds the
-     * ordinary Voxy LOD sections.
+     * Submits synthetic section refreshes to Voxy's ingestion service instead
+     * of running them on a separate addon-owned executor. Each queued callback
+     * runs on a normal Voxy service worker and still updates existing voxel data
+     * through WorldUpdater.insertUpdate.
      */
     private static void processPendingSections() {
         WorldEngine engine = activeEngine;
@@ -357,10 +357,7 @@ public final class ZoneVoxelOverlay {
         ConcurrentLinkedQueue<QueuedIngestWork> queue = VOXY_WORK_QUEUES.get(ingestService);
         if (queue == null) return false;
         QueuedIngestWork work = queue.poll();
-        if (work == null) {
-            VOXY_WORK_QUEUES.remove(ingestService, queue);
-            return false;
-        }
+        if (work == null) return false;
 
         try {
             work.task.run();
@@ -369,7 +366,6 @@ public final class ZoneVoxelOverlay {
             error.printStackTrace();
         } finally {
             work.engine.releaseRef();
-            if (queue.isEmpty()) VOXY_WORK_QUEUES.remove(ingestService, queue);
         }
         return true;
     }
