@@ -3,7 +3,6 @@ package dev.voxyexclude;
 public final class ShaderPatcher {
     public static final String VERTEX_SHADER = "voxy:lod/gl46/quads3.vert";
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
-    public static final String QUAD_UTIL = "voxy:lod/quad_util.glsl";
 
     private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V1";
     private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V1";
@@ -16,7 +15,7 @@ public final class ShaderPatcher {
 
     private static final String VERTEX_POSITION = """
             // Carry the synthetic marker and exact interpolated block-space position to the fragment shader.
-            voxyExcludeSynthetic = uint((extractBiomeId(quadData[uint(gl_VertexID)>>2]) & 256u) != 0u);
+            voxyExcludeSynthetic = uint((quadData[uint(gl_VertexID)>>2] >> 42) & uint64_t(1));
             vec2 voxyExcludeCornerMask = vec2((cornerId >> 1) & 1u, cornerId & 1u) * quad.lodScale;
             voxyExcludeWorldPos = quad.basePoint
                 + swizzelDataAxis(quad.axis, vec3(quad.quadSizeAddin * voxyExcludeCornerMask, 0.0));
@@ -101,9 +100,6 @@ public final class ShaderPatcher {
         if (FRAGMENT_SHADER.equals(id)) {
             return patchFragment(source);
         }
-        if (QUAD_UTIL.equals(id)) {
-            return patchQuadUtil(source);
-        }
         return source;
     }
 
@@ -139,15 +135,6 @@ public final class ShaderPatcher {
                 + "        return;\n"
                 + "    }\n");
         return source;
-    }
-
-    private static String patchQuadUtil(String source) {
-        String marker = "VOXY_EXCLUSION_ZONES_QUAD_UTIL_V1";
-        if (source.contains(marker)) return source;
-        String anchor = "tintColour = colourData[tintColour + extractBiomeId(quad)];";
-        requireOnce(source, anchor, "biome tint lookup");
-        return source.replace(anchor, "// " + marker + "\n"
-                + "        tintColour = colourData[tintColour + (extractBiomeId(quad) & 0xFFu)];");
     }
 
     private static void requireOnce(String source, String anchor, String description) {
