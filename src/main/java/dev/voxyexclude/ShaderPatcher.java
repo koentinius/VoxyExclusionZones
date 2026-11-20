@@ -38,6 +38,12 @@ public final class ShaderPatcher {
             for (uint i = 0u; i < voxyExcludeHeader.x; ++i) {
                 VoxyExcludeZone zone = voxyExcludeZones[i];
 
+                // Replacement-enabled zones are filled through Voxy's voxel pipeline;
+                // do not discard those replacement fragments in the terrain shader.
+                if (zone.shape.z != 0) {
+                    continue;
+                }
+
                 // quad positions are relative to baseSectionPos in 32-block sections.
                 ivec2 sectionDelta = ivec2(
                     zone.centerSectionOffset.x - baseSectionPos.x,
