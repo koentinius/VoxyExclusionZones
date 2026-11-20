@@ -1,5 +1,7 @@
 package dev.voxyexclude;
 
+import dev.voxyexclude.mixin.VoxelIngestServiceAccessor;
+
 import me.cortex.voxy.common.voxelization.VoxelizedSection;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
