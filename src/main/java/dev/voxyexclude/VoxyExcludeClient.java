@@ -8,6 +8,7 @@ public final class VoxyExcludeClient implements ClientModInitializer {
         try {
             ZoneManager.load();
             ZoneCommands.register();
+            ZoneConfigLifecycle.register();
         } catch (Exception e) {
             throw new IllegalStateException("Failed to load Voxy Exclusion Zones configuration", e);
         }
