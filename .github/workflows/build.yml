@@ -25,7 +25,7 @@ jobs:
           java-version: 21
       - uses: gradle/gradle-build-action@v3
         with:
-          gradle-version: 8.14.3
+          gradle-version: ${{ matrix.target == '1.21.11' && '9.2.1' || '8.14.3' }}
       - name: Build Minecraft 1.21.10
         if: matrix.target == '1.21.10'
         run: gradle --no-daemon build
@@ -33,7 +33,7 @@ jobs:
         if: matrix.target == '1.21.11'
         run: |
           gradle --no-daemon build \
-            -Ploom_version=1.13.6 \
+            -Ploom_version=1.14.8 \
             -Pminecraft_version=1.21.11 \
             -Pyarn_mappings=1.21.11+build.3 \
             -Pfabric_version=0.141.5+1.21.11 \
