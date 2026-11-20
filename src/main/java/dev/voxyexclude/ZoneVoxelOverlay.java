@@ -35,6 +35,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public final class ZoneVoxelOverlay {
     private static final int SECTION_BLOCK_SIZE = 32;
+    private static final int REPLACEMENT_DEPTH_BLOCKS = 30;
     private static final int MAX_QUEUED_SECTIONS = 500_000;
     private static final int SECTIONS_PER_TICK = 3;
 
@@ -200,7 +201,8 @@ public final class ZoneVoxelOverlay {
             this.maxX = Math.floorDiv(zone.centerX() + zone.size() - 1, SECTION_BLOCK_SIZE);
             this.minZ = Math.floorDiv(zone.centerZ() - zone.size(), SECTION_BLOCK_SIZE);
             this.maxZ = Math.floorDiv(zone.centerZ() + zone.size() - 1, SECTION_BLOCK_SIZE);
-            this.minY = Math.floorDiv(bottomY, SECTION_BLOCK_SIZE);
+            int fillBottomY = Math.max(bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
+            this.minY = Math.floorDiv(fillBottomY, SECTION_BLOCK_SIZE);
             this.y = Math.floorDiv(zone.surfaceY() - 1, SECTION_BLOCK_SIZE);
             this.x = minX;
             this.z = minZ;
@@ -394,7 +396,8 @@ public final class ZoneVoxelOverlay {
         for (int i = 0; i < current.zones.size(); i++) {
             ZoneData zoneData = current.zones.get(i);
             Zone zone = zoneData.zone;
-            int fillMinY = Math.max(current.bottomY, sectionMinY);
+            int zoneBottomY = Math.max(current.bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
+            int fillMinY = Math.max(zoneBottomY, sectionMinY);
             int fillMaxY = Math.min(sectionMaxY, zone.surfaceY());
             if (fillMinY >= fillMaxY || !intersectsHorizontalSection16(sectionMinX, sectionMinZ, zone)) {
                 continue;
@@ -420,7 +423,8 @@ public final class ZoneVoxelOverlay {
 
                     for (int i = 0; i < current.zones.size(); i++) {
                         Zone zone = current.zones.get(i).zone;
-                        if (intersects[i] && blockY < zone.surfaceY()
+                        int zoneBottomY = Math.max(current.bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
+                        if (intersects[i] && blockY >= zoneBottomY && blockY < zone.surfaceY()
                                 && containsBlock(zone, blockX, blockZ)) {
                             replacement = Mapper.isAir(original)
                                     ? fallbackIds[i] : withBlockPreservingMetadata(original, replacementBlockIds[i]);
