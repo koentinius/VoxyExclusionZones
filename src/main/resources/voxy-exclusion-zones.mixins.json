@@ -9,6 +9,7 @@
     "MDICSectionRendererMixin",
     "WorldUpdaterMixin",
     "RenderDataFactoryMixin",
+    "RenderGenerationServiceMixin",
     "WorldEngineMixin"
   ],
   "injectors": {
