@@ -22,6 +22,9 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -40,6 +43,8 @@ public final class ZoneVoxelOverlay {
             ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> CLEAR_ON_RETURN =
             ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> SUPPRESS_ACQUIRE_ENQUEUE =
+            ThreadLocal.withInitial(() -> false);
     private static final ReentrantLock[] UPDATE_LOCKS = createUpdateLocks();
     private static final ThreadLocal<ArrayDeque<ReentrantLock>> HELD_UPDATE_LOCKS =
             ThreadLocal.withInitial(ArrayDeque::new);
@@ -51,6 +56,8 @@ public final class ZoneVoxelOverlay {
     private static Snapshot pendingTargetSnapshot;
     private static boolean pendingRestore;
     private static final ArrayDeque<Long> pendingSections = new ArrayDeque<>();
+    private static final ConcurrentLinkedQueue<Long> acquiredSections = new ConcurrentLinkedQueue<>();
+    private static final Set<Long> acquiredSectionKeys = ConcurrentHashMap.newKeySet();
 
     private ZoneVoxelOverlay() {}
 
@@ -201,11 +208,19 @@ public final class ZoneVoxelOverlay {
 
     private static void processPendingSections() {
         WorldEngine engine = activeEngine;
-        if (engine == null || pendingSections.isEmpty() || !engine.isLive()) return;
+        if (engine == null || !engine.isLive()) return;
 
-        for (int i = 0; i < SECTIONS_PER_TICK && !pendingSections.isEmpty(); i++) {
-            long key = pendingSections.removeFirst();
-            processSection(engine, key, pendingRestore);
+        for (int i = 0; i < SECTIONS_PER_TICK; i++) {
+            Long acquiredKey = acquiredSections.poll();
+            if (acquiredKey != null) {
+                acquiredSectionKeys.remove(acquiredKey);
+                processSection(engine, acquiredKey, false);
+            } else if (!pendingSections.isEmpty()) {
+                long key = pendingSections.removeFirst();
+                processSection(engine, key, pendingRestore);
+            } else {
+                break;
+            }
         }
 
         if (pendingSections.isEmpty() && pendingTargetSnapshot != null) {
@@ -220,7 +235,12 @@ public final class ZoneVoxelOverlay {
         updateLock.lock();
         WorldSection worldSection = null;
         try {
-            worldSection = engine.acquire(key);
+            SUPPRESS_ACQUIRE_ENQUEUE.set(true);
+            try {
+                worldSection = engine.acquire(key);
+            } finally {
+                SUPPRESS_ACQUIRE_ENQUEUE.remove();
+            }
             long[] raw = worldSection._unsafeGetRawDataArray();
             long[] previousData = restoreFromStorage ? raw.clone() : null;
 
@@ -255,6 +275,26 @@ public final class ZoneVoxelOverlay {
         } finally {
             if (worldSection != null) worldSection.release();
             updateLock.unlock();
+        }
+    }
+
+    /** Queues a lightweight refresh when Voxy reacquires a level-zero section. */
+    public static void onSectionAcquired(WorldEngine engine, WorldSection section) {
+        if (section == null || section.lvl != 0 || SUPPRESS_ACQUIRE_ENQUEUE.get()
+                || engine != activeEngine || !engine.isLive()) return;
+
+        Snapshot current = snapshot;
+        if (current.world == null || current.zones.isEmpty()) return;
+
+        int minY = section.y << 5;
+        int maxY = minY + SECTION_BLOCK_SIZE;
+        for (ZoneData zoneData : current.zones) {
+            Zone zone = zoneData.zone;
+            if (maxY > current.bottomY && minY < zone.surfaceY()
+                    && intersectsHorizontalSection(section.x, section.z, zone)) {
+                if (acquiredSectionKeys.add(section.key)) acquiredSections.offer(section.key);
+                return;
+            }
         }
     }
 
@@ -511,6 +551,8 @@ public final class ZoneVoxelOverlay {
 
     private static void clearPending() {
         pendingSections.clear();
+        acquiredSections.clear();
+        acquiredSectionKeys.clear();
         pendingTargetSnapshot = null;
         pendingRestore = false;
     }
