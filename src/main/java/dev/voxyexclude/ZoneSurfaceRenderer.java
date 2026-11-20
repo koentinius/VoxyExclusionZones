@@ -1,7 +1,7 @@
 package dev.voxyexclude;
 
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.util.math.MatrixStack;
@@ -23,7 +23,7 @@ public final class ZoneSurfaceRenderer {
     }
 
     private static void render(WorldRenderContext context) {
-        if (context.world() == null || context.consumers() == null || context.matrixStack() == null) {
+        if (context.consumers() == null || context.matrices() == null) {
             return;
         }
 
@@ -34,8 +34,8 @@ public final class ZoneSurfaceRenderer {
             return;
         }
 
-        Vec3d camera = context.camera().getPos();
-        MatrixStack matrices = context.matrixStack();
+        Vec3d camera = context.worldState().cameraRenderState.pos;
+        MatrixStack matrices = context.matrices();
         matrices.push();
 
         try {
