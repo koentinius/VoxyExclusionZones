@@ -34,15 +34,9 @@ public final class ShaderPatcher {
             VoxyExcludeZone voxyExcludeZones[];
         };
 
-        bool voxyExcludeFragment(vec2 fragmentXZ) {
+        bool voxyExcludeFragment(vec3 fragmentPos) {
             for (uint i = 0u; i < voxyExcludeHeader.x; ++i) {
                 VoxyExcludeZone zone = voxyExcludeZones[i];
-
-                // Replacement-enabled zones are filled through Voxy's voxel pipeline;
-                // do not discard those replacement fragments in the terrain shader.
-                if (zone.shape.z != 0) {
-                    continue;
-                }
 
                 // quad positions are relative to baseSectionPos in 32-block sections.
                 ivec2 sectionDelta = ivec2(
@@ -53,19 +47,30 @@ public final class ShaderPatcher {
                     + vec2(zone.centerSectionOffset.z, zone.centerSectionOffset.w);
 
                 float size = float(zone.shape.y);
+                vec2 delta = fragmentPos.xz - zoneCenter;
+                bool inside;
                 if (zone.shape.x == 0) {
-                    vec2 delta = fragmentXZ - zoneCenter;
-                    if (dot(delta, delta) <= size * size) {
-                        return true;
-                    }
+                    inside = dot(delta, delta) <= size * size;
                 } else {
                     vec2 zoneMin = zoneCenter - vec2(size);
                     vec2 zoneMax = zoneCenter + vec2(size);
-                    if (all(greaterThanEqual(fragmentXZ, zoneMin))
-                            && all(lessThanEqual(fragmentXZ, zoneMax))) {
+                    inside = all(greaterThanEqual(fragmentPos.xz, zoneMin))
+                        && all(lessThanEqual(fragmentPos.xz, zoneMax));
+                }
+
+                if (!inside) continue;
+
+                if (zone.shape.z != 0) {
+                    // Keep the synthetic volume below the configured surface, but
+                    // clip original terrain above it so it cannot protrude through.
+                    float fragmentWorldY = fragmentPos.y + float(baseSectionPos.y) * 32.0;
+                    if (fragmentWorldY >= float(zone.shape.w)) {
                         return true;
                     }
+                    continue;
                 }
+
+                return true;
             }
             return false;
         }
@@ -110,7 +115,7 @@ public final class ShaderPatcher {
         String firstMainStatement = "void main() {\n";
         requireOnce(source, firstMainStatement, "fragment main body");
         source = source.replace(firstMainStatement, firstMainStatement
-                + "    if (voxyExcludeFragment(voxyExcludeWorldPos.xz)) {\n"
+                + "    if (voxyExcludeFragment(voxyExcludeWorldPos)) {\n"
                 + "        discard;\n"
                 + "        return;\n"
                 + "    }\n");
