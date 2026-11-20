@@ -3,6 +3,7 @@ package dev.voxyexclude.mixin;
 import dev.voxyexclude.ExclusionSsbo;
 import me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICSectionRenderer;
 import me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICViewport;
+import org.lwjgl.opengl.GL11;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -82,5 +83,25 @@ public abstract class MDICSectionRendererMixin {
             this.voxyexclude$zoneSsbo = null;
             this.voxyexclude$bindingState = null;
         }
+    }
+
+    /**
+     * Temporary diagnostic: bypass depth testing only for Voxy's section-proxy
+     * visibility draw. The later terrain draw retains its normal depth test.
+     */
+    @Inject(
+            method = "buildDrawCalls",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lorg/lwjgl/opengl/GL43;glDrawElementsIndirect(IIJ)V",
+                    shift = At.Shift.BEFORE
+            ),
+            remap = false
+    )
+    private void voxyexclude$disableDepthTestForVisibilityDiagnostic(
+            MDICViewport viewport,
+            CallbackInfo ci
+    ) {
+        GL11.glDisable(GL11.GL_DEPTH_TEST);
     }
 }
