@@ -135,9 +135,8 @@ public final class ZoneVoxelOverlay {
 
         if (engine == null) return;
 
-        long appliedRevision = pendingTargetSnapshot == null
-                ? appliedSnapshot.revision : pendingTargetSnapshot.revision;
-        if (current.revision == appliedRevision) return;
+        Snapshot targetSnapshot = pendingTargetSnapshot == null ? appliedSnapshot : pendingTargetSnapshot;
+        if (current.revision == targetSnapshot.revision && current.world == targetSnapshot.world) return;
 
         clearPending();
         Set<ZoneData> zonesToRefresh = new LinkedHashSet<>();
