@@ -37,7 +37,6 @@ public final class ZoneSurfaceRenderer {
         Vec3d camera = context.camera().getPos();
         MatrixStack matrices = context.matrixStack();
         matrices.push();
-        matrices.translate(-camera.x, -camera.y, -camera.z);
 
         try {
             VertexConsumer vertices = context.consumers().getBuffer(RenderLayer.getDebugQuads());
@@ -45,11 +44,13 @@ public final class ZoneSurfaceRenderer {
 
             for (Zone zone : zones) {
                 int color = colorFor(zone.surfaceMaterial());
-                float y = zone.surfaceY() + SURFACE_EPSILON;
+                float y = (float) (zone.surfaceY() + SURFACE_EPSILON - camera.y);
+                double centerX = zone.centerX() - camera.x;
+                double centerZ = zone.centerZ() - camera.z;
                 if (zone.type() == Zone.Type.CIRCLE) {
-                    emitCircle(vertices, matrix, zone.centerX(), y, zone.centerZ(), zone.size(), color);
+                    emitCircle(vertices, matrix, centerX, y, centerZ, zone.size(), color);
                 } else {
-                    emitSquare(vertices, matrix, zone.centerX(), y, zone.centerZ(), zone.size(), color);
+                    emitSquare(vertices, matrix, centerX, y, centerZ, zone.size(), color);
                 }
             }
         } finally {
