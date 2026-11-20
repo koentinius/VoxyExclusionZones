@@ -853,12 +853,16 @@ public final class ZoneVoxelOverlay {
                     .append(incoming.y).append(',').append(incoming.z).append(')');
 
             for (int lvl = 0; lvl <= 4; lvl++) {
-                WorldSection stored = engine.acquire(
+                WorldSection stored = engine.acquireIfExists(
                         lvl,
                         incoming.x >> (lvl + 1),
                         incoming.y >> (lvl + 1),
                         incoming.z >> (lvl + 1)
                 );
+                if (stored == null) {
+                    report.append("\n  LOD ").append(lvl).append(": section absent");
+                    continue;
+                }
                 try {
                     int synthetic = 0;
                     int nonAir = 0;
