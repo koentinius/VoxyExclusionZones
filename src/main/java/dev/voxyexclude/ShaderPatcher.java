@@ -14,7 +14,7 @@ public final class ShaderPatcher {
 
     private static final String VERTEX_POSITION = """
             // Carry the exact interpolated block-space position to the fragment shader.
-            vec2 voxyExcludeCornerMask = vec2((cornerId >> 1) & 1u, cornerId & 1u);
+            vec2 voxyExcludeCornerMask = vec2((cornerId >> 1) & 1u, cornerId & 1u) * quad.lodScale;
             voxyExcludeWorldPos = quad.basePoint
                 + swizzelDataAxis(quad.axis, vec3(quad.quadSizeAddin * voxyExcludeCornerMask, 0.0));
         """;
@@ -63,8 +63,13 @@ public final class ShaderPatcher {
                 if (zone.shape.z != 0) {
                     // Keep the synthetic volume below the configured surface, but
                     // clip original terrain above it so it cannot protrude through.
-                    float fragmentWorldY = fragmentPos.y + float(baseSectionPos.y) * 32.0;
-                    if (fragmentWorldY >= float(zone.shape.w)) {
+                    // Keep the replacement volume's upward-facing cap at surfaceY.
+                    // Voxy's face id 1 is UP; the original terrain's underside at the
+                    // same height is DOWN and must still be clipped.
+                    float surfaceRelativeY = float(zone.shape.w - baseSectionPos.y * 32);
+                    bool atSurface = abs(fragmentPos.y - surfaceRelativeY) <= 0.001;
+                    if (fragmentPos.y > surfaceRelativeY + 0.001
+                            || (atSurface && getFace() != 1u)) {
                         return true;
                     }
                     continue;
