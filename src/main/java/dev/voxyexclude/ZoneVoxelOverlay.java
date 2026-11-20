@@ -828,6 +828,56 @@ public final class ZoneVoxelOverlay {
         return SUPPRESS_SAVE.get();
     }
 
+    /**
+     * Diagnostic for the central surface section of each enabled zone.
+     * Counts the synthetic marker in Voxy's stored section data after
+     * WorldUpdater has propagated the incoming section through all parent LODs.
+     */
+    public static void diagnoseParentLods(WorldEngine engine, VoxelizedSection incoming) {
+        Snapshot current = snapshot;
+        if (current.world == null || current.zones.isEmpty()) return;
+
+        for (ZoneData zoneData : current.zones) {
+            Zone zone = zoneData.zone;
+            int targetX = Math.floorDiv(zone.centerX(), 16);
+            int targetY = Math.floorDiv(zone.surfaceY() - 1, 16);
+            int targetZ = Math.floorDiv(zone.centerZ(), 16);
+            if (incoming.x != targetX || incoming.y != targetY || incoming.z != targetZ) continue;
+
+            StringBuilder report = new StringBuilder();
+            report.append("[Voxy Exclusion Zones] Parent LOD marker diagnostic")
+                    .append(" zone=").append(zone.name())
+                    .append(" material=").append(zone.surfaceMaterial())
+                    .append(" surfaceY=").append(zone.surfaceY())
+                    .append(" incoming=(").append(incoming.x).append(',')
+                    .append(incoming.y).append(',').append(incoming.z).append(')');
+
+            for (int lvl = 0; lvl <= 4; lvl++) {
+                WorldSection stored = engine.acquire(
+                        lvl,
+                        incoming.x >> (lvl + 1),
+                        incoming.y >> (lvl + 1),
+                        incoming.z >> (lvl + 1)
+                );
+                try {
+                    int synthetic = 0;
+                    int nonAir = 0;
+                    for (long value : stored.data) {
+                        if ((value & SYNTHETIC_VOXEL_MARKER) != 0) synthetic++;
+                        if (!Mapper.isAir(value)) nonAir++;
+                    }
+                    report.append("\n  LOD ").append(lvl)
+                            .append(": synthetic=").append(synthetic)
+                            .append(", nonAir=").append(nonAir);
+                } finally {
+                    stored.release();
+                }
+            }
+            System.err.println(report);
+            return;
+        }
+    }
+
     private record SectionWork(long key, boolean restoreFromStorage) {}
     private record QueuedIngestWork(WorldEngine engine, Runnable task) {}
     private record ZoneData(Zone zone, BlockState state, RegistryEntry<Biome> biome, byte light) {}
