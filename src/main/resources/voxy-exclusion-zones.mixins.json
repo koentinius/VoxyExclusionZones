@@ -8,6 +8,7 @@
     "ShaderLoaderMixin",
     "MDICSectionRendererMixin",
     "WorldUpdaterMixin",
+    "RenderDataFactoryMixin",
     "WorldEngineMixin"
   ],
   "injectors": {
