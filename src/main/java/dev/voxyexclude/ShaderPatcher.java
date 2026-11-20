@@ -14,7 +14,7 @@ public final class ShaderPatcher {
 
     private static final String VERTEX_POSITION = """
             // Carry the exact interpolated block-space position to the fragment shader.
-            vec2 voxyExcludeCornerMask = vec2((cornerId >> 1) & 1u, cornerId & 1u) * quad.lodScale;
+            vec2 voxyExcludeCornerMask = vec2((cornerId >> 1) & 1u, cornerId & 1u);
             voxyExcludeWorldPos = quad.basePoint
                 + swizzelDataAxis(quad.axis, vec3(quad.quadSizeAddin * voxyExcludeCornerMask, 0.0));
         """;
