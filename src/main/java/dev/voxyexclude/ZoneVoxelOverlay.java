@@ -19,8 +19,9 @@ import java.util.List;
 /**
  * Applies replacement voxel data before Voxy builds its normal section meshes.
  *
- * The synthetic data is deliberately transient: WorldEngineMixin adds Voxy's
- * UPDATE_TYPE_DONT_SAVE flag while these updates are being committed.
+ * The game-thread snapshot keeps Minecraft world and lighting queries off
+ * Voxy's ingestion workers. Synthetic section changes are deliberately not
+ * persisted to Voxy's world storage.
  */
 public final class ZoneVoxelOverlay {
     private static final ThreadLocal<Boolean> SUPPRESS_SAVE =
@@ -28,54 +29,40 @@ public final class ZoneVoxelOverlay {
     private static final ThreadLocal<Boolean> CLEAR_ON_RETURN =
             ThreadLocal.withInitial(() -> false);
 
+    private static volatile Snapshot snapshot = Snapshot.empty();
+
     private ZoneVoxelOverlay() {}
 
-    /**
-     * Called at the head of Voxy's WorldUpdater.insertUpdate.
-     * Returns true when this section was changed by an active replacement zone.
-     */
-    public static boolean beginIngest(WorldEngine engine, VoxelizedSection section) {
-        if (SUPPRESS_SAVE.get()) return false;
-
-        MinecraftClient client = MinecraftClient.getInstance();
+    /** Refreshes biome/light inputs on the client thread. */
+    public static void refreshSnapshot(MinecraftClient client) {
         ClientWorld world = client.world;
-        if (world == null || !engine.isLive()) return false;
-
-        List<Zone> zones = new ArrayList<>();
-        for (Zone zone : ZoneManager.enabledSnapshot().zones()) {
-            if (zone.surfaceEnabled() && zone.surfaceY() > world.getBottomY()) {
-                zones.add(zone);
-            }
+        if (world == null) {
+            snapshot = Snapshot.empty();
+            return;
         }
-        if (zones.isEmpty()) return false;
 
-        int sectionMinX = section.x << 4;
-        int sectionMinY = section.y << 4;
-        int sectionMinZ = section.z << 4;
-        int sectionMaxY = sectionMinY + 16;
-        int worldBottomY = world.getBottomY();
-        if (sectionMaxY <= worldBottomY) return false;
+        final ZoneManager.EnabledSnapshot config;
+        try {
+            config = ZoneManager.enabledSnapshot();
+        } catch (IllegalStateException unloaded) {
+            snapshot = Snapshot.empty();
+            return;
+        }
 
-        Mapper mapper = engine.getMapper();
-        long[] replacementIds = new long[zones.size()];
-        boolean[] zoneIntersectsSection = new boolean[zones.size()];
+        Snapshot current = snapshot;
+        if (current.world == world && current.revision == config.revision()) return;
 
-        for (int i = 0; i < zones.size(); i++) {
-            Zone zone = zones.get(i);
-            int fillMinY = Math.max(worldBottomY, sectionMinY);
-            int fillMaxY = Math.min(sectionMaxY, zone.surfaceY());
-            if (fillMinY >= fillMaxY || !intersectsHorizontal(sectionMinX, sectionMinZ, zone)) {
-                continue;
-            }
+        int bottomY = world.getBottomY();
+        List<ZoneData> prepared = new ArrayList<>();
+        for (Zone zone : config.zones()) {
+            if (!zone.surfaceEnabled() || zone.surfaceY() <= bottomY) continue;
 
-            int sampleX = sectionMinX + 8;
-            int sampleZ = sectionMinZ + 8;
-            int sampleY = Math.max(fillMinY, Math.min(fillMaxY - 1, sectionMinY + 8));
-            BlockPos samplePos = new BlockPos(sampleX, sampleY, sampleZ);
+            int sampleY = Math.max(bottomY, zone.surfaceY() - 1);
+            BlockPos samplePos = new BlockPos(zone.centerX(), sampleY, zone.centerZ());
             RegistryEntry<Biome> biome = world.getBiome(samplePos);
             int sky = 15;
             int block = 0;
-            if (world.isChunkLoaded(sampleX >> 4, sampleZ >> 4)) {
+            if (world.isChunkLoaded(zone.centerX() >> 4, zone.centerZ() >> 4)) {
                 sky = world.getLightLevel(LightType.SKY, samplePos);
                 block = world.getLightLevel(LightType.BLOCK, samplePos);
             }
@@ -85,7 +72,42 @@ public final class ZoneVoxelOverlay {
                 case GRASS -> Blocks.GRASS_BLOCK.getDefaultState();
                 case SAND -> Blocks.SAND.getDefaultState();
             };
-            replacementIds[i] = mapper.getBaseId((byte) (sky | (block << 4)), state, biome);
+            prepared.add(new ZoneData(zone, state, biome, (byte) (sky | (block << 4))));
+        }
+
+        snapshot = new Snapshot(world, config.revision(), bottomY, List.copyOf(prepared));
+    }
+
+    /**
+     * Called at the head of Voxy's WorldUpdater.insertUpdate.
+     * Returns true when this section was changed by an active replacement zone.
+     */
+    public static boolean beginIngest(WorldEngine engine, VoxelizedSection section) {
+        if (SUPPRESS_SAVE.get()) return false;
+
+        Snapshot current = snapshot;
+        if (current.world == null || !engine.isLive() || current.zones.isEmpty()) return false;
+
+        int sectionMinX = section.x << 4;
+        int sectionMinY = section.y << 4;
+        int sectionMinZ = section.z << 4;
+        int sectionMaxY = sectionMinY + 16;
+        if (sectionMaxY <= current.bottomY) return false;
+
+        Mapper mapper = engine.getMapper();
+        long[] replacementIds = new long[current.zones.size()];
+        boolean[] zoneIntersectsSection = new boolean[current.zones.size()];
+
+        for (int i = 0; i < current.zones.size(); i++) {
+            ZoneData zoneData = current.zones.get(i);
+            Zone zone = zoneData.zone;
+            int fillMinY = Math.max(current.bottomY, sectionMinY);
+            int fillMaxY = Math.min(sectionMaxY, zone.surfaceY());
+            if (fillMinY >= fillMaxY || !intersectsHorizontal(sectionMinX, sectionMinZ, zone)) {
+                continue;
+            }
+
+            replacementIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
             zoneIntersectsSection[i] = true;
         }
 
@@ -93,7 +115,7 @@ public final class ZoneVoxelOverlay {
         int nonAirCount = 0;
         for (int y = 0; y < 16; y++) {
             int blockY = sectionMinY + y;
-            if (blockY < worldBottomY) continue;
+            if (blockY < current.bottomY) continue;
             for (int z = 0; z < 16; z++) {
                 int blockZ = sectionMinZ + z;
                 for (int x = 0; x < 16; x++) {
@@ -101,10 +123,11 @@ public final class ZoneVoxelOverlay {
                     int index = (y << 8) | (z << 4) | x;
                     long replacement = section.section[index];
 
-                    for (int i = 0; i < zones.size(); i++) {
+                    for (int i = 0; i < current.zones.size(); i++) {
+                        Zone zone = current.zones.get(i).zone;
                         if (zoneIntersectsSection[i]
-                                && blockY < zones.get(i).surfaceY()
-                                && containsBlock(zones.get(i), blockX, blockZ)) {
+                                && blockY < zone.surfaceY()
+                                && containsBlock(zone, blockX, blockZ)) {
                             replacement = replacementIds[i];
                         }
                     }
@@ -163,5 +186,12 @@ public final class ZoneVoxelOverlay {
             return dx * dx + dz * dz <= (double) zone.size() * zone.size();
         }
         return Math.abs(dx) <= zone.size() && Math.abs(dz) <= zone.size();
+    }
+
+    private record ZoneData(Zone zone, BlockState state, RegistryEntry<Biome> biome, byte light) {}
+    private record Snapshot(ClientWorld world, long revision, int bottomY, List<ZoneData> zones) {
+        private static Snapshot empty() {
+            return new Snapshot(null, -1, 0, List.of());
+        }
     }
 }
