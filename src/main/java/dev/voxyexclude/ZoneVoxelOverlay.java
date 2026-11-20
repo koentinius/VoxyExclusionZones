@@ -188,7 +188,7 @@ public final class ZoneVoxelOverlay {
         private final int maxX;
         private final int minZ;
         private final int maxZ;
-        private final int maxY;
+        private final int minY;
         private int x;
         private int z;
         private int y;
@@ -200,11 +200,11 @@ public final class ZoneVoxelOverlay {
             this.maxX = Math.floorDiv(zone.centerX() + zone.size() - 1, SECTION_BLOCK_SIZE);
             this.minZ = Math.floorDiv(zone.centerZ() - zone.size(), SECTION_BLOCK_SIZE);
             this.maxZ = Math.floorDiv(zone.centerZ() + zone.size() - 1, SECTION_BLOCK_SIZE);
-            this.y = Math.floorDiv(bottomY, SECTION_BLOCK_SIZE);
-            this.maxY = Math.floorDiv(zone.surfaceY() - 1, SECTION_BLOCK_SIZE);
+            this.minY = Math.floorDiv(bottomY, SECTION_BLOCK_SIZE);
+            this.y = Math.floorDiv(zone.surfaceY() - 1, SECTION_BLOCK_SIZE);
             this.x = minX;
             this.z = minZ;
-            this.done = zone.surfaceY() <= bottomY || maxY < y;
+            this.done = zone.surfaceY() <= bottomY || y < minY;
         }
 
         private Long next() {
@@ -227,8 +227,11 @@ public final class ZoneVoxelOverlay {
                 z++;
                 if (z > maxZ) {
                     z = minZ;
-                    y++;
-                    if (y > maxY) done = true;
+                    // Prioritize sections nearest the configured surface. This
+                    // makes the visible replacement appear first, even when a
+                    // very large zone reaches the bounded queue limit.
+                    y--;
+                    if (y < minY) done = true;
                 }
             }
         }
