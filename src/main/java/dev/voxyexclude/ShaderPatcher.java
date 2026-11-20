@@ -144,13 +144,14 @@ public final class ShaderPatcher {
                 + "        discard;\n"
                 + "        return;\n"
                 + "    }\n");
-        return source;
-    }
 
         String depthTest = "if (DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
         String replacementDepthTest = "if (voxyExcludeSynthetic == 0u && DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
         requireOnce(source, depthTest, "Voxy LOD depth-texture test");
         source = source.replace(depthTest, replacementDepthTest);
+        return source;
+    }
+
     private static void requireOnce(String source, String anchor, String description) {
         int first = source.indexOf(anchor);
         if (first < 0 || source.indexOf(anchor, first + anchor.length()) >= 0) {
