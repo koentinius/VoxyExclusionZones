@@ -3,6 +3,7 @@ package dev.voxyexclude;
 public final class ShaderPatcher {
     public static final String VERTEX_SHADER = "voxy:lod/gl46/quads3.vert";
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
+    public static final String QUAD_UTIL = "voxy:lod/quad_util.glsl";
 
     private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V1";
     private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V1";
@@ -10,10 +11,12 @@ public final class ShaderPatcher {
     private static final String VERTEX_DECLARATION = """
         // VOXY_EXCLUSION_ZONES_VERTEX_V1
         layout(location = 2) out vec3 voxyExcludeWorldPos;
+        layout(location = 3) flat out uint voxyExcludeSynthetic;
         """;
 
     private static final String VERTEX_POSITION = """
-            // Carry the exact interpolated block-space position to the fragment shader.
+            // Carry the synthetic marker and exact interpolated block-space position to the fragment shader.
+            voxyExcludeSynthetic = uint(extractBiomeId(quadData[uint(gl_VertexID)>>2]) == 256u);
             vec2 voxyExcludeCornerMask = vec2((cornerId >> 1) & 1u, cornerId & 1u) * quad.lodScale;
             voxyExcludeWorldPos = quad.basePoint
                 + swizzelDataAxis(quad.axis, vec3(quad.quadSizeAddin * voxyExcludeCornerMask, 0.0));
@@ -22,6 +25,7 @@ public final class ShaderPatcher {
     private static final String FRAGMENT_DECLARATION = """
         // VOXY_EXCLUSION_ZONES_FRAGMENT_V1
         layout(location = 2) in vec3 voxyExcludeWorldPos;
+        layout(location = 3) flat in uint voxyExcludeSynthetic;
 
         struct VoxyExcludeZone {
             ivec4 centerSectionOffset; // section X, section Z, block offset X, block offset Z
@@ -34,7 +38,8 @@ public final class ShaderPatcher {
             VoxyExcludeZone voxyExcludeZones[];
         };
 
-        bool voxyExcludeFragment(vec3 fragmentPos) {
+        bool voxyExcludeFragment(vec3 fragmentPos, bool synthetic) {
+            bool replacementAllowed = false;
             for (uint i = 0u; i < voxyExcludeHeader.x; ++i) {
                 VoxyExcludeZone zone = voxyExcludeZones[i];
 
@@ -58,26 +63,32 @@ public final class ShaderPatcher {
                         && all(lessThanEqual(fragmentPos.xz, zoneMax));
                 }
 
+                if (synthetic) {
+                    if (inside && zone.shape.z != 0) {
+                        float surfaceRelativeY = float(zone.shape.w - baseSectionPos.y * 32);
+                        float zoneBottomRelativeY = surfaceRelativeY - 30.0;
+                        bool atSurface = abs(fragmentPos.y - surfaceRelativeY) <= 0.001;
+                        if (fragmentPos.y >= zoneBottomRelativeY - 0.001
+                                && fragmentPos.y <= surfaceRelativeY + 0.001) {
+                            if (atSurface && getFace() != 1u) return true;
+                            replacementAllowed = true;
+                        }
+                    }
+                    continue;
+                }
+
                 if (!inside) continue;
 
                 if (zone.shape.z != 0) {
-                    // Keep the synthetic volume below the configured surface, but
-                    // clip original terrain above it so it cannot protrude through.
-                    // Keep the replacement volume's upward-facing cap at surfaceY.
-                    // Voxy's face id 1 is UP; the original terrain's underside at the
-                    // same height is DOWN and must still be clipped.
                     float surfaceRelativeY = float(zone.shape.w - baseSectionPos.y * 32);
-                    bool atSurface = abs(fragmentPos.y - surfaceRelativeY) <= 0.001;
-                    if (fragmentPos.y > surfaceRelativeY + 0.001
-                            || (atSurface && getFace() != 1u)) {
-                        return true;
-                    }
+                    float zoneBottomRelativeY = surfaceRelativeY - 30.0;
+                    if (fragmentPos.y >= zoneBottomRelativeY - 0.001) return true;
                     continue;
                 }
 
                 return true;
             }
-            return false;
+            return synthetic && !replacementAllowed;
         }
         """;
 
@@ -89,6 +100,9 @@ public final class ShaderPatcher {
         }
         if (FRAGMENT_SHADER.equals(id)) {
             return patchFragment(source);
+        }
+        if (QUAD_UTIL.equals(id)) {
+            return patchQuadUtil(source);
         }
         return source;
     }
@@ -120,11 +134,20 @@ public final class ShaderPatcher {
         String firstMainStatement = "void main() {\n";
         requireOnce(source, firstMainStatement, "fragment main body");
         source = source.replace(firstMainStatement, firstMainStatement
-                + "    if (voxyExcludeFragment(voxyExcludeWorldPos)) {\n"
+                + "    if (voxyExcludeFragment(voxyExcludeWorldPos, voxyExcludeSynthetic != 0u)) {\n"
                 + "        discard;\n"
                 + "        return;\n"
                 + "    }\n");
         return source;
+    }
+
+    private static String patchQuadUtil(String source) {
+        String marker = "VOXY_EXCLUSION_ZONES_QUAD_UTIL_V1";
+        if (source.contains(marker)) return source;
+        String anchor = "tintColour = colourData[tintColour + extractBiomeId(quad)];";
+        requireOnce(source, anchor, "biome tint lookup");
+        return source.replace(anchor, "// " + marker + "\n"
+                + "        tintColour = colourData[tintColour + (extractBiomeId(quad) & 0xFFu)];");
     }
 
     private static void requireOnce(String source, String anchor, String description) {
