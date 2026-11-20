@@ -4,6 +4,8 @@ import me.cortex.voxy.common.voxelization.VoxelizedSection;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 import me.cortex.voxy.common.world.WorldUpdater;
+import me.cortex.voxy.common.world.service.VoxelIngestService;
+import me.cortex.voxy.common.thread.Service;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
 import me.cortex.voxy.common.world.other.Mapper;
 import me.cortex.voxy.common.world.other.Mipper;
@@ -24,8 +26,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -62,11 +62,7 @@ public final class ZoneVoxelOverlay {
     private static volatile Snapshot appliedSnapshot = Snapshot.empty();
     private static volatile Snapshot pendingTargetSnapshot;
     private static final ConcurrentLinkedQueue<SectionWork> pendingSections = new ConcurrentLinkedQueue<>();
-    private static final ExecutorService sectionWorker = Executors.newSingleThreadExecutor(task -> {
-        Thread thread = new Thread(task, "Voxy Exclusion Zones section updater");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private static final ConcurrentHashMap<VoxelIngestService, ConcurrentLinkedQueue<QueuedIngestWork>> VOXY_WORK_QUEUES = new ConcurrentHashMap<>();
     private static final AtomicBoolean workerScheduled = new AtomicBoolean();
     private static final Set<Long> acquiredSectionKeys = ConcurrentHashMap.newKeySet();
     private static final Set<Long> processingSectionKeys = ConcurrentHashMap.newKeySet();
@@ -279,36 +275,103 @@ public final class ZoneVoxelOverlay {
         WorldEngine engine = activeEngine;
         if (engine == null || !engine.isLive() || pendingSections.isEmpty()) return;
         if (!workerScheduled.compareAndSet(false, true)) return;
+        scheduleNextSection(engine);
+    }
 
-        sectionWorker.execute(() -> {
+    /**
+     * Runs one overlay section as a job on Voxy's own ingestion service. The
+     * service therefore applies its normal worker-pool scheduling and lifecycle
+     * management, while the job retains our already-voxelized storage data.
+     */
+    private static void scheduleNextSection(WorldEngine engine) {
+        if (activeEngine != engine || !engine.isLive()) {
+            workerScheduled.set(false);
+            return;
+        }
+
+        SectionWork work = pendingSections.poll();
+        if (work == null) {
+            if (pendingTargetSnapshot != null) {
+                appliedSnapshot = pendingTargetSnapshot;
+                pendingTargetSnapshot = null;
+            }
+            workerScheduled.set(false);
+            // Close the enqueue-versus-completion race.
+            if (!pendingSections.isEmpty()) processPendingSections();
+            return;
+        }
+
+        boolean queued = enqueueVoxyWork(engine, () -> {
             try {
-                SectionWork work;
-                while ((work = pendingSections.poll()) != null) {
-                    WorldEngine currentEngine = activeEngine;
-                    if (currentEngine == null || currentEngine != engine || !currentEngine.isLive()) {
-                        break;
-                    }
+                if (activeEngine == engine && engine.isLive()) {
                     acquiredSectionKeys.remove(work.key);
-                    try {
-                        processSection(currentEngine, work.key, work.restoreFromStorage);
-                    } catch (Throwable error) {
-                        System.err.println("[Voxy Exclusion Zones] Failed to refresh section "
-                                + work.key + ": " + error);
-                        error.printStackTrace();
-                    }
+                    processSection(engine, work.key, work.restoreFromStorage);
                 }
-
-                if (pendingSections.isEmpty() && pendingTargetSnapshot != null) {
-                    appliedSnapshot = pendingTargetSnapshot;
-                    pendingTargetSnapshot = null;
-                            }
+            } catch (Throwable error) {
+                System.err.println("[Voxy Exclusion Zones] Failed to refresh section "
+                        + work.key + ": " + error);
+                error.printStackTrace();
             } finally {
-                workerScheduled.set(false);
-                // Close the race where new work arrived after the drain observed
-                // an empty queue but before it released the scheduled flag.
-                processPendingSections();
+                scheduleNextSection(engine);
             }
         });
+
+        if (!queued) {
+            pendingSections.offer(work);
+            workerScheduled.set(false);
+        }
+    }
+
+    private static boolean enqueueVoxyWork(WorldEngine engine, Runnable task) {
+        if (engine.instanceIn == null) return false;
+        VoxelIngestService ingestService = engine.instanceIn.getIngestService();
+        if (!(ingestService instanceof VoxelIngestServiceAccessor accessor)) {
+            System.err.println("[Voxy Exclusion Zones] Voxy ingestion-service accessor mixin is unavailable");
+            return false;
+        }
+        Service service = accessor.voxyexclude$getService();
+        if (!service.isLive()) return false;
+
+        engine.acquireRef();
+        ConcurrentLinkedQueue<QueuedIngestWork> queue =
+                VOXY_WORK_QUEUES.computeIfAbsent(ingestService, ignored -> new ConcurrentLinkedQueue<>());
+        QueuedIngestWork work = new QueuedIngestWork(engine, task);
+        queue.offer(work);
+        try {
+            service.execute();
+            return true;
+        } catch (Throwable error) {
+            queue.remove(work);
+            engine.releaseRef();
+            System.err.println("[Voxy Exclusion Zones] Could not schedule work on Voxy ingestion service: " + error);
+            return false;
+        }
+    }
+
+    /**
+     * Called by the VoxelIngestService mixin on a Voxy service worker. Returning
+     * true consumes exactly one service job; false lets Voxy process its normal
+     * Minecraft-chunk ingestion queue.
+     */
+    public static boolean runQueuedIngestWork(VoxelIngestService ingestService) {
+        ConcurrentLinkedQueue<QueuedIngestWork> queue = VOXY_WORK_QUEUES.get(ingestService);
+        if (queue == null) return false;
+        QueuedIngestWork work = queue.poll();
+        if (work == null) {
+            VOXY_WORK_QUEUES.remove(ingestService, queue);
+            return false;
+        }
+
+        try {
+            work.task.run();
+        } catch (Throwable error) {
+            System.err.println("[Voxy Exclusion Zones] Voxy worker task failed: " + error);
+            error.printStackTrace();
+        } finally {
+            work.engine.releaseRef();
+            if (queue.isEmpty()) VOXY_WORK_QUEUES.remove(ingestService, queue);
+        }
+        return true;
     }
 
     private static void processSection(WorldEngine engine, long key, boolean restoreFromStorage) {
@@ -733,7 +796,6 @@ public final class ZoneVoxelOverlay {
         acquiredSectionKeys.clear();
         processingSectionKeys.clear();
         pendingTargetSnapshot = null;
-        pendingRestore = false;
     }
 
     /** Called at the head of Voxy's WorldUpdater.insertUpdate. */
@@ -765,6 +827,7 @@ public final class ZoneVoxelOverlay {
     }
 
     private record SectionWork(long key, boolean restoreFromStorage) {}
+    private record QueuedIngestWork(WorldEngine engine, Runnable task) {}
     private record ZoneData(Zone zone, BlockState state, RegistryEntry<Biome> biome, byte light) {}
     private record Snapshot(ClientWorld world, long revision, int bottomY, List<ZoneData> zones) {
         private static Snapshot empty() {
