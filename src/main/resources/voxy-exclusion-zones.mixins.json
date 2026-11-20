@@ -10,6 +10,7 @@
     "WorldUpdaterMixin",
     "RenderDataFactoryMixin",
     "RenderGenerationServiceMixin",
+    "MipperMixin",
     "WorldEngineMixin"
   ],
   "injectors": {
