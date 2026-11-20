@@ -15,7 +15,6 @@ import net.minecraft.util.math.Vec3d;
 public final class ZoneSurfaceRenderer {
     private static final int CIRCLE_SEGMENTS = 64;
     private static final float SURFACE_EPSILON = 0.002f;
-    private static final int FULL_BRIGHT = 0x00F000F0;
 
     private ZoneSurfaceRenderer() {}
 
@@ -113,9 +112,6 @@ public final class ZoneSurfaceRenderer {
 
     private static void vertex(VertexConsumer out, MatrixStack.Entry matrix,
                                double x, float y, double z, int color) {
-        out.vertex(matrix, (float) x, y, (float) z)
-                .color(color)
-                .light(FULL_BRIGHT)
-                .normal(matrix, 0.0f, 1.0f, 0.0f);
+        out.vertex(matrix, (float) x, y, (float) z).color(color);
     }
 }
