@@ -5,7 +5,7 @@ public final class ShaderPatcher {
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
 
     private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V2";
-    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V2";
+    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V3";
 
     private static final String VERTEX_DECLARATION = """
         // VOXY_EXCLUSION_ZONES_VERTEX_V2
@@ -24,7 +24,7 @@ public final class ShaderPatcher {
         """;
 
     private static final String FRAGMENT_DECLARATION = """
-        // VOXY_EXCLUSION_ZONES_FRAGMENT_V2
+        // VOXY_EXCLUSION_ZONES_FRAGMENT_V3
         layout(location = 2) in vec3 voxyExcludeWorldPos;
         layout(location = 3) flat in uint voxyExcludeSynthetic;
         layout(location = 4) flat in float voxyExcludeLodScale;
@@ -147,6 +147,10 @@ public final class ShaderPatcher {
         return source;
     }
 
+        String depthTest = "if (DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
+        String replacementDepthTest = "if (voxyExcludeSynthetic == 0u && DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
+        requireOnce(source, depthTest, "Voxy LOD depth-texture test");
+        source = source.replace(depthTest, replacementDepthTest);
     private static void requireOnce(String source, String anchor, String description) {
         int first = source.indexOf(anchor);
         if (first < 0 || source.indexOf(anchor, first + anchor.length()) >= 0) {
