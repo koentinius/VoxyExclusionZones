@@ -5,7 +5,7 @@ public final class ShaderPatcher {
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
 
     private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V2";
-    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V6";
+    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V7";
 
     private static final String VERTEX_DECLARATION = """
         // VOXY_EXCLUSION_ZONES_VERTEX_V2
@@ -24,7 +24,7 @@ public final class ShaderPatcher {
         """;
 
     private static final String FRAGMENT_DECLARATION = """
-        // VOXY_EXCLUSION_ZONES_FRAGMENT_V6
+        // VOXY_EXCLUSION_ZONES_FRAGMENT_V7
         layout(location = 2) in vec3 voxyExcludeWorldPos;
         layout(location = 3) flat in uint voxyExcludeSynthetic;
         layout(location = 4) flat in float voxyExcludeLodScale;
@@ -145,14 +145,30 @@ public final class ShaderPatcher {
                 + "        return;\n"
                 + "    }\n");
 
-        // Voxy 0.2.6-alpha rejects fragments behind its minimum-depth texture.
-        // Synthetic replacement faces intentionally occupy the excluded volume,
-        // so bypass only this Voxy-specific rejection for those faces. The normal
-        // OpenGL depth test remains active.
-        String depthTest = "if (gl_FragCoord.z < texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r) {";
-        String replacementDepthTest = "if (voxyExcludeSynthetic == 0u && gl_FragCoord.z < texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r) {";
-        requireOnce(source, depthTest, "Voxy minimum-depth texture test");
-        source = source.replace(depthTest, replacementDepthTest);
+        // Voxy's minimum-depth comparison is expressed through a macro in
+        // current versions so reverse-Z and normal-Z use the correct comparison.
+        // Older builds used a literal less-than comparison. Bypass this Voxy
+        // culling test only for synthetic replacement faces; keep the actual
+        // OpenGL depth test active.
+        String macroDepthTest =
+                "if (DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
+        String replacementMacroDepthTest =
+                "if (voxyExcludeSynthetic == 0u && DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
+        String legacyDepthTest =
+                "if (gl_FragCoord.z < texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r) {";
+        String replacementLegacyDepthTest =
+                "if (voxyExcludeSynthetic == 0u && gl_FragCoord.z < texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r) {";
+
+        if (source.contains(macroDepthTest)) {
+            requireOnce(source, macroDepthTest, "Voxy minimum-depth macro test");
+            source = source.replace(macroDepthTest, replacementMacroDepthTest);
+        } else if (source.contains(legacyDepthTest)) {
+            requireOnce(source, legacyDepthTest, "legacy Voxy minimum-depth test");
+            source = source.replace(legacyDepthTest, replacementLegacyDepthTest);
+        } else {
+            throw new IllegalStateException(
+                    "Voxy exclusion shader patch: unsupported minimum-depth texture test");
+        }
         return source;
     }
 
