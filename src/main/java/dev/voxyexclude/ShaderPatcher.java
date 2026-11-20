@@ -4,27 +4,30 @@ public final class ShaderPatcher {
     public static final String VERTEX_SHADER = "voxy:lod/gl46/quads3.vert";
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
 
-    private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V1";
-    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V1";
+    private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V2";
+    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V2";
 
     private static final String VERTEX_DECLARATION = """
-        // VOXY_EXCLUSION_ZONES_VERTEX_V1
+        // VOXY_EXCLUSION_ZONES_VERTEX_V2
         layout(location = 2) out vec3 voxyExcludeWorldPos;
         layout(location = 3) flat out uint voxyExcludeSynthetic;
+        layout(location = 4) flat out float voxyExcludeLodScale;
         """;
 
     private static final String VERTEX_POSITION = """
-            // Carry the synthetic marker and exact interpolated block-space position to the fragment shader.
+            // Carry the synthetic marker, LOD cell size, and exact block-space position to the fragment shader.
             voxyExcludeSynthetic = uint((quadData[uint(gl_VertexID)>>2] >> 42) & uint64_t(1));
+            voxyExcludeLodScale = quad.lodScale;
             vec2 voxyExcludeCornerMask = vec2((cornerId >> 1) & 1u, cornerId & 1u) * quad.lodScale;
             voxyExcludeWorldPos = quad.basePoint
                 + swizzelDataAxis(quad.axis, vec3(quad.quadSizeAddin * voxyExcludeCornerMask, 0.0));
         """;
 
     private static final String FRAGMENT_DECLARATION = """
-        // VOXY_EXCLUSION_ZONES_FRAGMENT_V1
+        // VOXY_EXCLUSION_ZONES_FRAGMENT_V2
         layout(location = 2) in vec3 voxyExcludeWorldPos;
         layout(location = 3) flat in uint voxyExcludeSynthetic;
+        layout(location = 4) flat in float voxyExcludeLodScale;
 
         struct VoxyExcludeZone {
             ivec4 centerSectionOffset; // section X, section Z, block offset X, block offset Z
@@ -37,7 +40,7 @@ public final class ShaderPatcher {
             VoxyExcludeZone voxyExcludeZones[];
         };
 
-        bool voxyExcludeFragment(vec3 fragmentPos, bool synthetic) {
+        bool voxyExcludeFragment(vec3 fragmentPos, bool synthetic, float lodScale) {
             bool replacementAllowed = false;
             for (uint i = 0u; i < voxyExcludeHeader.x; ++i) {
                 VoxyExcludeZone zone = voxyExcludeZones[i];
@@ -66,9 +69,16 @@ public final class ShaderPatcher {
                     if (inside && zone.shape.z != 0) {
                         float surfaceRelativeY = float(zone.shape.w - baseSectionPos.y * 32);
                         float zoneBottomRelativeY = surfaceRelativeY - 30.0;
+
+                        // Parent LOD voxels represent whole 2^LOD cells. A cell
+                        // containing even one replacement voxel can have its mesh
+                        // face displaced from the exact 30-block slab boundary by
+                        // almost one cell. Clip with that LOD-sized quantization
+                        // margin, otherwise the coarse replacement mesh vanishes.
+                        float verticalTolerance = max(lodScale, 1.0);
                         bool atSurface = abs(fragmentPos.y - surfaceRelativeY) <= 0.001;
-                        if (fragmentPos.y >= zoneBottomRelativeY - 0.001
-                                && fragmentPos.y <= surfaceRelativeY + 0.001) {
+                        if (fragmentPos.y >= zoneBottomRelativeY - verticalTolerance
+                                && fragmentPos.y <= surfaceRelativeY + verticalTolerance) {
                             if (atSurface && getFace() != 1u) return true;
                             replacementAllowed = true;
                         }
@@ -130,7 +140,7 @@ public final class ShaderPatcher {
         String firstMainStatement = "void main() {\n";
         requireOnce(source, firstMainStatement, "fragment main body");
         source = source.replace(firstMainStatement, firstMainStatement
-                + "    if (voxyExcludeFragment(voxyExcludeWorldPos, voxyExcludeSynthetic != 0u)) {\n"
+                + "    if (voxyExcludeFragment(voxyExcludeWorldPos, voxyExcludeSynthetic != 0u, voxyExcludeLodScale)) {\n"
                 + "        discard;\n"
                 + "        return;\n"
                 + "    }\n");
