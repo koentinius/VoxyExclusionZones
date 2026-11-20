@@ -318,7 +318,8 @@ public final class ZoneVoxelOverlay {
         long maxZ = minZ + 32L * scale;
 
         Mapper mapper = engine.getMapper();
-        long[] replacementIds = new long[current.zones.size()];
+        int[] replacementBlockIds = new int[current.zones.size()];
+        long[] fallbackIds = new long[current.zones.size()];
         boolean[] intersects = new boolean[current.zones.size()];
         boolean anyIntersect = false;
         for (int i = 0; i < current.zones.size(); i++) {
@@ -326,7 +327,8 @@ public final class ZoneVoxelOverlay {
             Zone zone = zoneData.zone;
             if (maxY <= current.bottomY || minY >= zone.surfaceY()
                     || !intersectsHorizontalBounds(minX, minZ, maxX, maxZ, zone)) continue;
-            replacementIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
+            replacementBlockIds[i] = mapper.getIdForBlockState(zoneData.state);
+            fallbackIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
             intersects[i] = true;
             anyIntersect = true;
         }
@@ -342,13 +344,15 @@ public final class ZoneVoxelOverlay {
                 for (int x = 0; x < 32; x++) {
                     double blockCenterX = minX + (x + 0.5) * scale;
                     int index = WorldSection.getIndex(x, y, z);
-                    long replacement = data[index];
+                    long original = data[index];
+                    long replacement = original;
 
                     for (int i = 0; i < current.zones.size(); i++) {
                         Zone zone = current.zones.get(i).zone;
                         if (intersects[i] && blockCenterY < zone.surfaceY()
                                 && containsPoint(zone, blockCenterX, blockCenterZ)) {
-                            replacement = replacementIds[i];
+                            replacement = Mapper.isAir(original)
+                                    ? fallbackIds[i] : Mapper.withBlock(original, replacementBlockIds[i]);
                         }
                     }
 
@@ -433,7 +437,8 @@ public final class ZoneVoxelOverlay {
         int sectionMaxY = sectionMinY + 16;
         if (sectionMaxY <= current.bottomY) return false;
 
-        long[] replacementIds = new long[current.zones.size()];
+        int[] replacementBlockIds = new int[current.zones.size()];
+        long[] fallbackIds = new long[current.zones.size()];
         boolean[] intersects = new boolean[current.zones.size()];
         boolean anyIntersect = false;
         for (int i = 0; i < current.zones.size(); i++) {
@@ -444,7 +449,8 @@ public final class ZoneVoxelOverlay {
             if (fillMinY >= fillMaxY || !intersectsHorizontalSection16(sectionMinX, sectionMinZ, zone)) {
                 continue;
             }
-            replacementIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
+            replacementBlockIds[i] = mapper.getIdForBlockState(zoneData.state);
+            fallbackIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
             intersects[i] = true;
             anyIntersect = true;
         }
@@ -459,13 +465,15 @@ public final class ZoneVoxelOverlay {
                 for (int x = 0; x < 16; x++) {
                     int blockX = sectionMinX + x;
                     int index = (y << 8) | (z << 4) | x;
-                    long replacement = section.section[index];
+                    long original = section.section[index];
+                    long replacement = original;
 
                     for (int i = 0; i < current.zones.size(); i++) {
                         Zone zone = current.zones.get(i).zone;
                         if (intersects[i] && blockY < zone.surfaceY()
                                 && containsBlock(zone, blockX, blockZ)) {
-                            replacement = replacementIds[i];
+                            replacement = Mapper.isAir(original)
+                                    ? fallbackIds[i] : Mapper.withBlock(original, replacementBlockIds[i]);
                         }
                     }
 
