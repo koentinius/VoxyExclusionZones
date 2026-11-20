@@ -14,6 +14,8 @@ You do **not** need to install Gradle manually.
 3. Double-click the matching build script.
 4. The script downloads the required Gradle distribution, runs the build, and reports the output JAR.
 
+You can also download prebuilt test JARs from the latest successful GitHub Actions run for this pull request. Open the run and choose the artifact matching your Minecraft version.
+
 The first build requires an internet connection to download Gradle and the Minecraft/Fabric/Voxy dependencies. Later builds reuse the Gradle distribution and dependency cache.
 
 Expected output:
