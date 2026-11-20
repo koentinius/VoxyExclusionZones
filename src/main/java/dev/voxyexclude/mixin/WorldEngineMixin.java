@@ -46,25 +46,4 @@ public abstract class WorldEngineMixin {
         ZoneVoxelOverlay.onSectionAcquired((WorldEngine) (Object) this, cir.getReturnValue());
     }
 
-    @Inject(
-            method = "acquireIfExists(IIII)Lme/cortex/voxy/common/world/WorldSection;",
-            at = @At("RETURN"),
-            remap = false
-    )
-    private void voxyexclude$overlayExistingSection(
-            int level, int x, int y, int z, CallbackInfoReturnable<WorldSection> cir
-    ) {
-        ZoneVoxelOverlay.onSectionAcquired((WorldEngine) (Object) this, cir.getReturnValue());
-    }
-
-    @Inject(
-            method = "acquireIfExists(J)Lme/cortex/voxy/common/world/WorldSection;",
-            at = @At("RETURN"),
-            remap = false
-    )
-    private void voxyexclude$overlayExistingSectionByKey(
-            long key, CallbackInfoReturnable<WorldSection> cir
-    ) {
-        ZoneVoxelOverlay.onSectionAcquired((WorldEngine) (Object) this, cir.getReturnValue());
-    }
 }
