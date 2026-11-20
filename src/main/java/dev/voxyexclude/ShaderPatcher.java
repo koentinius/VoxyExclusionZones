@@ -140,15 +140,10 @@ public final class ShaderPatcher {
         String firstMainStatement = "void main() {\n";
         requireOnce(source, firstMainStatement, "fragment main body");
         source = source.replace(firstMainStatement, firstMainStatement
-                + "    // Temporary diagnostic: show marker-bearing replacement quads in magenta,\n"
-                + "    // before material sampling and both Voxy depth rejection paths.\n"
-                + "    #ifndef PATCHED_SHADER\n"
-                + "    if (voxyExcludeSynthetic != 0u) {\n"
-                + "        gl_FragDepth = 0.0;\n"
-                + "        outColour = vec4(1.0, 0.0, 1.0, 1.0);\n"
+                + "    if (voxyExcludeSynthetic == 0u && voxyExcludeFragment(voxyExcludeWorldPos, false, voxyExcludeLodScale)) {\n"
+                + "        discard;\n"
                 + "        return;\n"
-                + "    }\n"
-                + "    #endif\n");
+                + "    }\n");
 
         // Voxy 0.2.6-alpha rejects fragments behind its minimum-depth texture.
         // Synthetic replacement faces intentionally occupy the excluded volume,
