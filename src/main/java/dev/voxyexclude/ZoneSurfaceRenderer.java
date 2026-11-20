@@ -17,7 +17,7 @@ import java.lang.reflect.Method;
 public final class ZoneSurfaceRenderer {
     private static final int CIRCLE_SEGMENTS = 64;
     private static final float SURFACE_EPSILON = 0.002f;
-    private static final RenderLayer DEBUG_QUADS_LAYER = resolveDebugQuadsLayer();
+    private static RenderLayer debugQuadsLayer;
 
     private ZoneSurfaceRenderer() {}
 
@@ -42,7 +42,7 @@ public final class ZoneSurfaceRenderer {
         matrices.push();
 
         try {
-            VertexConsumer vertices = context.consumers().getBuffer(DEBUG_QUADS_LAYER);
+            VertexConsumer vertices = context.consumers().getBuffer(debugQuadsLayer());
             MatrixStack.Entry matrix = matrices.peek();
 
             for (Zone zone : zones) {
@@ -65,6 +65,13 @@ public final class ZoneSurfaceRenderer {
      * Minecraft 1.21.10 exposes this layer on RenderLayer; 1.21.11 moved it
      * to RenderLayers. Resolve once so the same source supports both targets.
      */
+    private static RenderLayer debugQuadsLayer() {
+        if (debugQuadsLayer == null) {
+            debugQuadsLayer = resolveDebugQuadsLayer();
+        }
+        return debugQuadsLayer;
+    }
+
     private static RenderLayer resolveDebugQuadsLayer() {
         try {
             Method method;
