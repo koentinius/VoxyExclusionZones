@@ -204,7 +204,9 @@ public final class ZoneVoxelOverlay {
             this.maxZ = Math.floorDiv(zone.centerZ() + zone.size() - 1, SECTION_BLOCK_SIZE);
             int fillBottomY = Math.max(bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
             this.minY = Math.floorDiv(fillBottomY, SECTION_BLOCK_SIZE);
-            this.y = Math.floorDiv(zone.surfaceY() - 1, SECTION_BLOCK_SIZE);
+            // Include the section containing the surface block so the replacement's
+            // upward face can be generated against synthetic air above it.
+            this.y = Math.floorDiv(zone.surfaceY(), SECTION_BLOCK_SIZE);
             this.x = minX;
             this.z = minZ;
             this.done = zone.surfaceY() <= bottomY || y < minY;
@@ -348,7 +350,7 @@ public final class ZoneVoxelOverlay {
         for (ZoneData zoneData : current.zones) {
             Zone zone = zoneData.zone;
             int zoneBottomY = Math.max(current.bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
-            if (maxY > zoneBottomY && minY < zone.surfaceY()
+            if (maxY > zoneBottomY && minY <= zone.surfaceY()
                     && !processingSectionKeys.contains(section.key)
                     && intersectsHorizontalSection(section.x, section.z, zone)) {
                 if (acquiredSectionKeys.add(section.key)) acquiredSections.offer(section.key);
@@ -406,7 +408,9 @@ public final class ZoneVoxelOverlay {
             int zoneBottomY = Math.max(current.bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
             int fillMinY = Math.max(zoneBottomY, sectionMinY);
             int fillMaxY = Math.min(sectionMaxY, zone.surfaceY());
-            if (fillMinY >= fillMaxY || !intersectsHorizontalSection16(sectionMinX, sectionMinZ, zone)) {
+            boolean containsSurfaceBlock = sectionMinY <= zone.surfaceY() && sectionMaxY > zone.surfaceY();
+            if ((fillMinY >= fillMaxY && !containsSurfaceBlock)
+                    || !intersectsHorizontalSection16(sectionMinX, sectionMinZ, zone)) {
                 continue;
             }
             // Every voxel in the synthetic volume must use identical material,
@@ -433,9 +437,17 @@ public final class ZoneVoxelOverlay {
                     for (int i = 0; i < current.zones.size(); i++) {
                         Zone zone = current.zones.get(i).zone;
                         int zoneBottomY = Math.max(current.bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
-                        if (intersects[i] && blockY >= zoneBottomY && blockY < zone.surfaceY()
-                                && containsBlock(zone, blockX, blockZ)) {
-                            replacement = replacementIds[i];
+                        if (intersects[i] && containsBlock(zone, blockX, blockZ)) {
+                            if (blockY == zone.surfaceY()) {
+                                // Voxy culls the shared face between opaque
+                                // replacement blocks and the original terrain
+                                // above them. Make that first terrain layer air
+                                // in the synthetic view so the replacement's UP
+                                // face is emitted by the normal section mesher.
+                                replacement = Mapper.composeMappingId((byte) 15, 0, 0);
+                            } else if (blockY >= zoneBottomY && blockY < zone.surfaceY()) {
+                                replacement = replacementIds[i];
+                            }
                         }
                     }
 
