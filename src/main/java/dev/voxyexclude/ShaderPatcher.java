@@ -187,7 +187,7 @@ public final class ShaderPatcher {
         String anchor = "bool shouldRender = (dat&0x7fffffffu) == frameId;";
         requireOnce(source, anchor, "section visibility-buffer test");
         return source.replace(anchor,
-                "// " + COMMAND_GENERATION_MARKER + "\\n"
+                "// " + COMMAND_GENERATION_MARKER + "\n"
                 + "bool shouldRender = true;");
     }
 
