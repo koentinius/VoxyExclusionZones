@@ -5,7 +5,7 @@ public final class ShaderPatcher {
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
 
     private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V2";
-    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V5";
+    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V6";
 
     private static final String VERTEX_DECLARATION = """
         // VOXY_EXCLUSION_ZONES_VERTEX_V2
@@ -24,7 +24,7 @@ public final class ShaderPatcher {
         """;
 
     private static final String FRAGMENT_DECLARATION = """
-        // VOXY_EXCLUSION_ZONES_FRAGMENT_V5
+        // VOXY_EXCLUSION_ZONES_FRAGMENT_V6
         layout(location = 2) in vec3 voxyExcludeWorldPos;
         layout(location = 3) flat in uint voxyExcludeSynthetic;
         layout(location = 4) flat in float voxyExcludeLodScale;
@@ -140,7 +140,7 @@ public final class ShaderPatcher {
         String firstMainStatement = "void main() {\n";
         requireOnce(source, firstMainStatement, "fragment main body");
         source = source.replace(firstMainStatement, firstMainStatement
-                + "    if (voxyExcludeFragment(voxyExcludeWorldPos, voxyExcludeSynthetic != 0u, voxyExcludeLodScale)) {\n"
+                + "    if (voxyExcludeSynthetic == 0u && voxyExcludeFragment(voxyExcludeWorldPos, false, voxyExcludeLodScale)) {\n"
                 + "        discard;\n"
                 + "        return;\n"
                 + "    }\n");
