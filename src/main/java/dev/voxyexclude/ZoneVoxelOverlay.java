@@ -1,8 +1,12 @@
 package dev.voxyexclude;
 
+import me.cortex.voxy.client.core.IVoxyRenderSystemHolder;
+import me.cortex.voxy.client.core.VoxyRenderSystem;
 import me.cortex.voxy.common.voxelization.VoxelizedSection;
 import me.cortex.voxy.common.voxelization.WorldVoxilizedSectionMipper;
 import me.cortex.voxy.common.world.WorldEngine;
+import me.cortex.voxy.common.world.WorldSection;
+import me.cortex.voxy.common.world.WorldUpdater;
 import me.cortex.voxy.common.world.other.Mapper;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -13,17 +17,26 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.LightType;
 import net.minecraft.world.biome.Biome;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Applies replacement voxel data before Voxy builds its normal section meshes.
  *
- * The game-thread snapshot keeps Minecraft world and lighting queries off
- * Voxy's ingestion workers. Synthetic section changes are deliberately not
- * persisted to Voxy's world storage.
+ * Biome and light inputs are sampled on the client thread. Voxy ingestion runs
+ * on worker threads, so the mixin only consumes this immutable snapshot there.
+ * Synthetic section changes are deliberately not persisted to Voxy storage.
  */
 public final class ZoneVoxelOverlay {
+    private static final int SECTION_BLOCK_SIZE = 32;
+    private static final int MAX_QUEUED_SECTIONS = 500_000;
+    private static final int SECTIONS_PER_TICK = 3;
+
     private static final ThreadLocal<Boolean> SUPPRESS_SAVE =
             ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> CLEAR_ON_RETURN =
@@ -31,27 +44,48 @@ public final class ZoneVoxelOverlay {
 
     private static volatile Snapshot snapshot = Snapshot.empty();
 
+    private static WorldEngine activeEngine;
+    private static Snapshot appliedSnapshot = Snapshot.empty();
+    private static Snapshot pendingTargetSnapshot;
+    private static boolean pendingRestore;
+    private static final ArrayDeque<Long> pendingSections = new ArrayDeque<>();
+    private static final Set<Long> pendingSectionSet = new HashSet<>();
+
     private ZoneVoxelOverlay() {}
 
-    /** Refreshes biome/light inputs on the client thread. */
+    /** Refreshes biome/light inputs and processes a small amount of section work on the client thread. */
     public static void refreshSnapshot(MinecraftClient client) {
+        Snapshot previous = snapshot;
         ClientWorld world = client.world;
+        Snapshot current;
+
         if (world == null) {
-            snapshot = Snapshot.empty();
-            return;
+            current = Snapshot.empty();
+        } else {
+            final ZoneManager.EnabledSnapshot config;
+            try {
+                config = ZoneManager.enabledSnapshot();
+            } catch (IllegalStateException unloaded) {
+                current = Snapshot.empty();
+                snapshot = current;
+                syncEngine(client, previous, current);
+                processPendingSections();
+                return;
+            }
+
+            if (previous.world == world && previous.revision == config.revision()) {
+                current = previous;
+            } else {
+                current = buildSnapshot(world, config);
+            }
         }
 
-        final ZoneManager.EnabledSnapshot config;
-        try {
-            config = ZoneManager.enabledSnapshot();
-        } catch (IllegalStateException unloaded) {
-            snapshot = Snapshot.empty();
-            return;
-        }
+        snapshot = current;
+        syncEngine(client, previous, current);
+        processPendingSections();
+    }
 
-        Snapshot current = snapshot;
-        if (current.world == world && current.revision == config.revision()) return;
-
+    private static Snapshot buildSnapshot(ClientWorld world, ZoneManager.EnabledSnapshot config) {
         int bottomY = world.getBottomY();
         List<ZoneData> prepared = new ArrayList<>();
         for (Zone zone : config.zones()) {
@@ -75,18 +109,178 @@ public final class ZoneVoxelOverlay {
             prepared.add(new ZoneData(zone, state, biome, (byte) (sky | (block << 4))));
         }
 
-        snapshot = new Snapshot(world, config.revision(), bottomY, List.copyOf(prepared));
+        return new Snapshot(world, config.revision(), bottomY, List.copyOf(prepared));
     }
 
-    /**
-     * Called at the head of Voxy's WorldUpdater.insertUpdate.
-     * Returns true when this section was changed by an active replacement zone.
-     */
-    public static boolean beginIngest(WorldEngine engine, VoxelizedSection section) {
-        if (SUPPRESS_SAVE.get()) return false;
+    private static void syncEngine(MinecraftClient client, Snapshot previous, Snapshot current) {
+        VoxyRenderSystem renderer = IVoxyRenderSystemHolder.getNullable();
+        WorldEngine engine = renderer == null ? null : renderer.getEngine();
 
-        Snapshot current = snapshot;
-        if (current.world == null || !engine.isLive() || current.zones.isEmpty()) return false;
+        if (engine != activeEngine) {
+            activeEngine = engine;
+            clearPending();
+            appliedSnapshot = Snapshot.empty();
+            pendingTargetSnapshot = null;
+            if (engine != null && !current.zones.isEmpty()) {
+                queueZones(current.zones, current.bottomY);
+                pendingTargetSnapshot = current;
+                pendingRestore = false;
+            } else {
+                appliedSnapshot = current;
+            }
+            return;
+        }
+
+        if (engine == null) return;
+
+        long appliedRevision = pendingTargetSnapshot == null
+                ? appliedSnapshot.revision : pendingTargetSnapshot.revision;
+        if (current.revision == appliedRevision) return;
+
+        clearPending();
+        Set<ZoneData> zonesToRefresh = new LinkedHashSet<>();
+        zonesToRefresh.addAll(appliedSnapshot.zones);
+        if (pendingTargetSnapshot != null) zonesToRefresh.addAll(pendingTargetSnapshot.zones);
+        zonesToRefresh.addAll(current.zones);
+
+        queueZones(List.copyOf(zonesToRefresh), current.bottomY);
+        pendingTargetSnapshot = current;
+        pendingRestore = true;
+        if (pendingSections.isEmpty()) {
+            appliedSnapshot = current;
+            pendingTargetSnapshot = null;
+        }
+    }
+
+    private static void queueZones(List<ZoneData> zones, int bottomY) {
+        Set<Long> unique = new LinkedHashSet<>();
+        int minSectionY = Math.floorDiv(bottomY, SECTION_BLOCK_SIZE);
+
+        for (ZoneData zoneData : zones) {
+            Zone zone = zoneData.zone;
+            int minX = Math.floorDiv(zone.centerX() - zone.size(), SECTION_BLOCK_SIZE);
+            int maxX = Math.floorDiv(zone.centerX() + zone.size() - 1, SECTION_BLOCK_SIZE);
+            int minZ = Math.floorDiv(zone.centerZ() - zone.size(), SECTION_BLOCK_SIZE);
+            int maxZ = Math.floorDiv(zone.centerZ() + zone.size() - 1, SECTION_BLOCK_SIZE);
+            int maxY = Math.floorDiv(zone.surfaceY() - 1, SECTION_BLOCK_SIZE);
+
+            for (int sy = minSectionY; sy <= maxY; sy++) {
+                for (int sz = minZ; sz <= maxZ; sz++) {
+                    for (int sx = minX; sx <= maxX; sx++) {
+                        if (!intersectsHorizontalSection(sx, sz, zone)) continue;
+                        unique.add(WorldEngine.getWorldSectionId(0, sx, sy, sz));
+                        if (unique.size() >= MAX_QUEUED_SECTIONS) break;
+                    }
+                    if (unique.size() >= MAX_QUEUED_SECTIONS) break;
+                }
+                if (unique.size() >= MAX_QUEUED_SECTIONS) break;
+            }
+            if (unique.size() >= MAX_QUEUED_SECTIONS) break;
+        }
+
+        pendingSections.addAll(unique);
+        pendingSectionSet.addAll(unique);
+    }
+
+    private static boolean intersectsHorizontalSection(int sectionX, int sectionZ, Zone zone) {
+        double minX = sectionX * (double) SECTION_BLOCK_SIZE;
+        double minZ = sectionZ * (double) SECTION_BLOCK_SIZE;
+        double maxX = minX + SECTION_BLOCK_SIZE;
+        double maxZ = minZ + SECTION_BLOCK_SIZE;
+        if (zone.type() == Zone.Type.SQUARE) {
+            return maxX > zone.centerX() - zone.size()
+                    && minX < zone.centerX() + zone.size()
+                    && maxZ > zone.centerZ() - zone.size()
+                    && minZ < zone.centerZ() + zone.size();
+        }
+
+        double closestX = Math.max(minX, Math.min(zone.centerX(), maxX));
+        double closestZ = Math.max(minZ, Math.min(zone.centerZ(), maxZ));
+        double dx = closestX - zone.centerX();
+        double dz = closestZ - zone.centerZ();
+        return dx * dx + dz * dz <= (double) zone.size() * zone.size();
+    }
+
+    private static void processPendingSections() {
+        WorldEngine engine = activeEngine;
+        if (engine == null || pendingSections.isEmpty() || !engine.isLive()) return;
+
+        for (int i = 0; i < SECTIONS_PER_TICK && !pendingSections.isEmpty(); i++) {
+            long key = pendingSections.removeFirst();
+            pendingSectionSet.remove(key);
+            processSection(engine, key, pendingRestore);
+        }
+
+        if (pendingSections.isEmpty() && pendingTargetSnapshot != null) {
+            appliedSnapshot = pendingTargetSnapshot;
+            pendingTargetSnapshot = null;
+            pendingRestore = false;
+        }
+    }
+
+    private static void processSection(WorldEngine engine, long key, boolean restoreFromStorage) {
+        WorldSection worldSection = engine.acquire(key);
+        try {
+            long[] raw = worldSection._unsafeGetRawDataArray();
+            long[] previousData = restoreFromStorage ? raw.clone() : null;
+
+            if (restoreFromStorage) {
+                int status = engine.storage.loadSection(worldSection);
+                if (status < 0) status = 1;
+                if (status == 1) {
+                    Arrays.fill(raw, Mapper.composeMappingId((byte) 15, 0, 0));
+                }
+            }
+
+            int baseX = worldSection.x << 1;
+            int baseY = worldSection.y << 1;
+            int baseZ = worldSection.z << 1;
+
+            for (int subY = 0; subY < 2; subY++) {
+                for (int subZ = 0; subZ < 2; subZ++) {
+                    for (int subX = 0; subX < 2; subX++) {
+                        VoxelizedSection voxelized = VoxelizedSection.createEmpty()
+                                .setPosition(baseX + subX, baseY + subY, baseZ + subZ);
+
+                        boolean changed = copySubSection(raw, voxelized, subX, subY, subZ, previousData);
+                        changed |= applyZones(voxelized, snapshot, engine.getMapper());
+                        if (!changed) continue;
+
+                        voxelized.lvl0NonAirCount = countNonAir(voxelized.section);
+                        WorldVoxilizedSectionMipper.mipSection(voxelized, engine.getMapper());
+                        insertWithoutSaving(engine, voxelized);
+                    }
+                }
+            }
+        } finally {
+            worldSection.release();
+        }
+    }
+
+    private static boolean copySubSection(
+            long[] raw, VoxelizedSection target, int subX, int subY, int subZ, long[] previousData
+    ) {
+        boolean changed = false;
+        int offsetX = subX << 4;
+        int offsetY = subY << 4;
+        int offsetZ = subZ << 4;
+
+        for (int y = 0; y < 16; y++) {
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) {
+                    int targetIndex = (y << 8) | (z << 4) | x;
+                    int sourceIndex = WorldSection.getIndex(offsetX + x, offsetY + y, offsetZ + z);
+                    long value = raw[sourceIndex];
+                    target.section[targetIndex] = value;
+                    if (previousData != null && previousData[sourceIndex] != value) changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    private static boolean applyZones(VoxelizedSection section, Snapshot current, Mapper mapper) {
+        if (current.world == null || current.zones.isEmpty()) return false;
 
         int sectionMinX = section.x << 4;
         int sectionMinY = section.y << 4;
@@ -94,25 +288,21 @@ public final class ZoneVoxelOverlay {
         int sectionMaxY = sectionMinY + 16;
         if (sectionMaxY <= current.bottomY) return false;
 
-        Mapper mapper = engine.getMapper();
         long[] replacementIds = new long[current.zones.size()];
-        boolean[] zoneIntersectsSection = new boolean[current.zones.size()];
-
+        boolean[] intersects = new boolean[current.zones.size()];
         for (int i = 0; i < current.zones.size(); i++) {
             ZoneData zoneData = current.zones.get(i);
             Zone zone = zoneData.zone;
             int fillMinY = Math.max(current.bottomY, sectionMinY);
             int fillMaxY = Math.min(sectionMaxY, zone.surfaceY());
-            if (fillMinY >= fillMaxY || !intersectsHorizontal(sectionMinX, sectionMinZ, zone)) {
+            if (fillMinY >= fillMaxY || !intersectsHorizontalSection16(sectionMinX, sectionMinZ, zone)) {
                 continue;
             }
-
             replacementIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
-            zoneIntersectsSection[i] = true;
+            intersects[i] = true;
         }
 
         boolean changed = false;
-        int nonAirCount = 0;
         for (int y = 0; y < 16; y++) {
             int blockY = sectionMinY + y;
             if (blockY < current.bottomY) continue;
@@ -125,8 +315,7 @@ public final class ZoneVoxelOverlay {
 
                     for (int i = 0; i < current.zones.size(); i++) {
                         Zone zone = current.zones.get(i).zone;
-                        if (zoneIntersectsSection[i]
-                                && blockY < zone.surfaceY()
+                        if (intersects[i] && blockY < zone.surfaceY()
                                 && containsBlock(zone, blockX, blockZ)) {
                             replacement = replacementIds[i];
                         }
@@ -136,15 +325,76 @@ public final class ZoneVoxelOverlay {
                         section.section[index] = replacement;
                         changed = true;
                     }
-                    if (!Mapper.isAir(replacement)) nonAirCount++;
                 }
             }
         }
+        return changed;
+    }
 
+    private static boolean intersectsHorizontalSection16(int sectionMinX, int sectionMinZ, Zone zone) {
+        double minX = sectionMinX;
+        double minZ = sectionMinZ;
+        double maxX = sectionMinX + 16.0;
+        double maxZ = sectionMinZ + 16.0;
+        if (zone.type() == Zone.Type.SQUARE) {
+            return maxX > zone.centerX() - zone.size()
+                    && minX < zone.centerX() + zone.size()
+                    && maxZ > zone.centerZ() - zone.size()
+                    && minZ < zone.centerZ() + zone.size();
+        }
+        double closestX = Math.max(minX, Math.min(zone.centerX(), maxX));
+        double closestZ = Math.max(minZ, Math.min(zone.centerZ(), maxZ));
+        double dx = closestX - zone.centerX();
+        double dz = closestZ - zone.centerZ();
+        return dx * dx + dz * dz <= (double) zone.size() * zone.size();
+    }
+
+    private static boolean containsBlock(Zone zone, int blockX, int blockZ) {
+        double dx = blockX + 0.5 - zone.centerX();
+        double dz = blockZ + 0.5 - zone.centerZ();
+        if (zone.type() == Zone.Type.CIRCLE) {
+            return dx * dx + dz * dz <= (double) zone.size() * zone.size();
+        }
+        return Math.abs(dx) <= zone.size() && Math.abs(dz) <= zone.size();
+    }
+
+    private static int countNonAir(long[] data) {
+        int count = 0;
+        for (int i = 0; i < 16 * 16 * 16; i++) {
+            if (!Mapper.isAir(data[i])) count++;
+        }
+        return count;
+    }
+
+    private static void insertWithoutSaving(WorldEngine engine, VoxelizedSection section) {
+        SUPPRESS_SAVE.set(true);
+        try {
+            WorldUpdater.insertUpdate(engine, section);
+        } finally {
+            SUPPRESS_SAVE.remove();
+            CLEAR_ON_RETURN.remove();
+        }
+    }
+
+    private static void clearPending() {
+        pendingSections.clear();
+        pendingSectionSet.clear();
+        pendingTargetSnapshot = null;
+        pendingRestore = false;
+    }
+
+    /** Called at the head of Voxy's WorldUpdater.insertUpdate. */
+    public static boolean beginIngest(WorldEngine engine, VoxelizedSection section) {
+        if (SUPPRESS_SAVE.get()) return false;
+
+        Snapshot current = snapshot;
+        if (current.world == null || !engine.isLive() || current.zones.isEmpty()) return false;
+
+        boolean changed = applyZones(section, current, engine.getMapper());
         if (!changed) return false;
 
-        section.lvl0NonAirCount = nonAirCount;
-        WorldVoxilizedSectionMipper.mipSection(section, mapper);
+        section.lvl0NonAirCount = countNonAir(section.section);
+        WorldVoxilizedSectionMipper.mipSection(section, engine.getMapper());
         SUPPRESS_SAVE.set(true);
         CLEAR_ON_RETURN.set(true);
         return true;
@@ -159,33 +409,6 @@ public final class ZoneVoxelOverlay {
 
     public static boolean shouldSuppressSave() {
         return SUPPRESS_SAVE.get();
-    }
-
-    private static boolean intersectsHorizontal(int sectionMinX, int sectionMinZ, Zone zone) {
-        double minX = sectionMinX;
-        double minZ = sectionMinZ;
-        double maxX = sectionMinX + 16.0;
-        double maxZ = sectionMinZ + 16.0;
-        double closestX = Math.max(minX, Math.min(zone.centerX(), maxX));
-        double closestZ = Math.max(minZ, Math.min(zone.centerZ(), maxZ));
-        double dx = closestX - zone.centerX();
-        double dz = closestZ - zone.centerZ();
-        if (zone.type() == Zone.Type.CIRCLE) {
-            return dx * dx + dz * dz <= (double) zone.size() * zone.size();
-        }
-        return maxX > zone.centerX() - zone.size()
-                && minX < zone.centerX() + zone.size()
-                && maxZ > zone.centerZ() - zone.size()
-                && minZ < zone.centerZ() + zone.size();
-    }
-
-    private static boolean containsBlock(Zone zone, int blockX, int blockZ) {
-        double dx = blockX + 0.5 - zone.centerX();
-        double dz = blockZ + 0.5 - zone.centerZ();
-        if (zone.type() == Zone.Type.CIRCLE) {
-            return dx * dx + dz * dz <= (double) zone.size() * zone.size();
-        }
-        return Math.abs(dx) <= zone.size() && Math.abs(dz) <= zone.size();
     }
 
     private record ZoneData(Zone zone, BlockState state, RegistryEntry<Biome> biome, byte light) {}
