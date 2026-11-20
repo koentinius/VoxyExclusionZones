@@ -17,6 +17,7 @@ if not exist "%GRADLE_EXE%" (
 )
 
 call "%GRADLE_EXE%" --no-daemon build ^
+  -Ploom_version=1.13.6 ^
   -Pminecraft_version=1.21.11 ^
   -Pyarn_mappings=1.21.11+build.3 ^
   -Pfabric_version=0.141.5+1.21.11 ^
