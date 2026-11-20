@@ -105,7 +105,7 @@ public final class ZoneVoxelOverlay {
 
     private static Snapshot buildSnapshot(ClientWorld world, ZoneManager.EnabledSnapshot config) {
         int bottomY = world.getBottomY();
-        int topY = world.getTopY();
+        int topY = world.getBottomY() + world.getHeight();
         List<ZoneData> prepared = new ArrayList<>();
         for (Zone zone : config.zones()) {
             if (!zone.surfaceEnabled() || zone.surfaceY() <= bottomY) continue;
