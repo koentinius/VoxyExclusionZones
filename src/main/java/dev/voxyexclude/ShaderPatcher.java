@@ -111,6 +111,9 @@ public final class ShaderPatcher {
         if (FRAGMENT_SHADER.equals(id)) {
             return patchFragment(source);
         }
+        if (COMMAND_GENERATION_SHADER.equals(id)) {
+            return patchCommandGeneration(source);
+        }
         return source;
     }
 
@@ -181,7 +184,19 @@ public final class ShaderPatcher {
         return source;
     }
 
-    private static void requireOnce(String source, String anchor, String description) {
+
+    private static final String COMMAND_GENERATION_MARKER = "VOXY_EXCLUSION_ZONES_FORCE_VISIBLE_DIAGNOSTIC_V1";
+
+    private static String patchCommandGeneration(String source) {
+        if (source.contains(COMMAND_GENERATION_MARKER)) {
+            return source;
+        }
+        String anchor = "bool shouldRender = (dat&0x7fffffffu) == frameId;";
+        requireOnce(source, anchor, "section visibility-buffer test");
+        return source.replace(anchor, "// " + COMMAND_GENERATION_MARKER + "\\n"
+                + "bool shouldRender = true;");
+    }
+\n    private static void requireOnce(String source, String anchor, String description) {
         int first = source.indexOf(anchor);
         if (first < 0 || source.indexOf(anchor, first + anchor.length()) >= 0) {
             throw new IllegalStateException("Voxy exclusion shader patch: expected exactly one " + description);
