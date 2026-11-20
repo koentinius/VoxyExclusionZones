@@ -6,7 +6,14 @@
   "refmap": "voxy-exclusion-zones-refmap.json",
   "client": [
     "ShaderLoaderMixin",
-    "MDICSectionRendererMixin"
+    "MDICSectionRendererMixin",
+    "WorldUpdaterMixin",
+    "VoxelIngestServiceAccessor",
+    "VoxelIngestServiceMixin",
+    "RenderDataFactoryMixin",
+    "RenderGenerationServiceMixin",
+    "MipperMixin",
+    "WorldEngineMixin"
   ],
   "injectors": {
     "defaultRequire": 1

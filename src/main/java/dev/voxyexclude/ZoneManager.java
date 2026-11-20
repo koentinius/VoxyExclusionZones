@@ -9,7 +9,9 @@ import java.util.*;
 
 public final class ZoneManager {
     private static final int CONFIG_VERSION = 2;
-    private static final Path CONFIG_FILE = FabricLoader.getInstance().getConfigDir().resolve("voxy-exclusion-zones.json");
+    private static final Path LEGACY_CONFIG_FILE = FabricLoader.getInstance().getConfigDir().resolve("voxy-exclusion-zones.json");
+    private static Path configFile = LEGACY_CONFIG_FILE;
+    private static boolean legacyMigrationConsidered;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Object LOCK = new Object();
     private static final LinkedHashMap<String, Zone> ZONES = new LinkedHashMap<>();
@@ -22,8 +24,8 @@ public final class ZoneManager {
 
     public static void load() throws IOException {
         synchronized (LOCK) {
-            if (Files.exists(CONFIG_FILE)) {
-                JsonObject root = JsonParser.parseString(Files.readString(CONFIG_FILE)).getAsJsonObject();
+            if (Files.exists(configFile)) {
+                JsonObject root = JsonParser.parseString(Files.readString(configFile)).getAsJsonObject();
                 int version = root.has("version") ? root.get("version").getAsInt() : CONFIG_VERSION;
                 if (version < 1 || version > CONFIG_VERSION) throw new IOException("Unsupported config version: " + version);
                 LinkedHashMap<String, Zone> parsed = new LinkedHashMap<>();
@@ -155,7 +157,74 @@ public final class ZoneManager {
         }
     }
 
-    public static Path configPath() { return CONFIG_FILE; }
+    public static Path configPath() { synchronized (LOCK) { return configFile; } }
+
+    public static void unload() {
+        synchronized (LOCK) {
+            ZONES.clear();
+            loaded = false;
+            revision++;
+        }
+    }
+
+    public static void switchStorage(Path target) throws IOException {
+        Path normalized = target.toAbsolutePath().normalize();
+        synchronized (LOCK) {
+            if (!loaded) {
+                configFile = normalized;
+                loadCurrentFile();
+                loaded = true;
+                revision++;
+                return;
+            }
+            if (normalized.equals(configFile.toAbsolutePath().normalize())) return;
+            if (!legacyMigrationConsidered) {
+                legacyMigrationConsidered = true;
+                if (!Files.exists(normalized) && Files.exists(LEGACY_CONFIG_FILE)) {
+                    Files.createDirectories(normalized.getParent());
+                    try {
+                        Files.move(LEGACY_CONFIG_FILE, normalized, StandardCopyOption.ATOMIC_MOVE);
+                    } catch (AtomicMoveNotSupportedException e) {
+                        Files.move(LEGACY_CONFIG_FILE, normalized, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
+            }
+            configFile = normalized;
+            ZONES.clear();
+            loadCurrentFile();
+            revision++;
+        }
+    }
+
+    private static void loadCurrentFile() throws IOException {
+        if (!Files.exists(configFile)) {
+            saveMap(Map.of());
+            return;
+        }
+        JsonObject root;
+        try {
+            root = JsonParser.parseString(Files.readString(configFile)).getAsJsonObject();
+        } catch (RuntimeException e) {
+            throw new IOException("Invalid zone config: " + configFile, e);
+        }
+        int version = root.has("version") ? root.get("version").getAsInt() : CONFIG_VERSION;
+        if (version < 1 || version > CONFIG_VERSION) throw new IOException("Unsupported config version: " + version);
+        LinkedHashMap<String, Zone> parsed = new LinkedHashMap<>();
+        JsonArray zones = root.getAsJsonArray("zones");
+        if (zones != null) for (JsonElement element : zones) {
+            JsonObject z = element.getAsJsonObject();
+            Zone zone = new Zone(z.get("name").getAsString(),
+                Zone.Type.valueOf(z.get("type").getAsString().toUpperCase(Locale.ROOT)),
+                z.get("centerX").getAsInt(), z.get("centerZ").getAsInt(),
+                z.get("size").getAsInt(), z.get("enabled").getAsBoolean(),
+                z.has("surfaceEnabled") && z.get("surfaceEnabled").getAsBoolean(),
+                z.has("surfaceMaterial") ? Zone.SurfaceMaterial.valueOf(z.get("surfaceMaterial").getAsString().toUpperCase(Locale.ROOT)) : Zone.SurfaceMaterial.GRASS,
+                z.has("surfaceY") ? z.get("surfaceY").getAsInt() : 64);
+            if (parsed.putIfAbsent(zone.name(), zone) != null) throw new IOException("Duplicate zone: " + zone.name());
+        }
+        ZONES.clear();
+        ZONES.putAll(parsed);
+    }
 
     private static void ensureLoaded() {
         if (!loaded) throw new IllegalStateException("ZoneManager has not been loaded");
@@ -186,13 +255,13 @@ public final class ZoneManager {
             array.add(item);
         }
         root.add("zones", array);
-        Path temp = CONFIG_FILE.resolveSibling(CONFIG_FILE.getFileName() + ".tmp");
-        Files.createDirectories(CONFIG_FILE.getParent());
+        Path temp = configFile.resolveSibling(configFile.getFileName() + ".tmp");
+        Files.createDirectories(configFile.getParent());
         Files.writeString(temp, GSON.toJson(root));
         try {
-            Files.move(temp, CONFIG_FILE, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            Files.move(temp, configFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (AtomicMoveNotSupportedException e) {
-            Files.move(temp, CONFIG_FILE, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(temp, configFile, StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(temp);
         }

@@ -3,25 +3,32 @@ package dev.voxyexclude;
 public final class ShaderPatcher {
     public static final String VERTEX_SHADER = "voxy:lod/gl46/quads3.vert";
     public static final String FRAGMENT_SHADER = "voxy:lod/gl46/quads.frag";
+    public static final String COMMAND_GENERATION_SHADER = "voxy:lod/gl46/cmdgen.comp";
 
-    private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V1";
-    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V1";
+    private static final String VERTEX_MARKER = "VOXY_EXCLUSION_ZONES_VERTEX_V2";
+    private static final String FRAGMENT_MARKER = "VOXY_EXCLUSION_ZONES_FRAGMENT_V7";
 
     private static final String VERTEX_DECLARATION = """
-        // VOXY_EXCLUSION_ZONES_VERTEX_V1
+        // VOXY_EXCLUSION_ZONES_VERTEX_V2
         layout(location = 2) out vec3 voxyExcludeWorldPos;
+        layout(location = 3) flat out uint voxyExcludeSynthetic;
+        layout(location = 4) flat out float voxyExcludeLodScale;
         """;
 
     private static final String VERTEX_POSITION = """
-            // Carry the exact interpolated block-space position to the fragment shader.
+            // Carry the synthetic marker, LOD cell size, and exact block-space position to the fragment shader.
+            voxyExcludeSynthetic = uint((quadData[uint(gl_VertexID)>>2] >> 42) & uint64_t(1));
+            voxyExcludeLodScale = quad.lodScale;
             vec2 voxyExcludeCornerMask = vec2((cornerId >> 1) & 1u, cornerId & 1u) * quad.lodScale;
             voxyExcludeWorldPos = quad.basePoint
                 + swizzelDataAxis(quad.axis, vec3(quad.quadSizeAddin * voxyExcludeCornerMask, 0.0));
         """;
 
     private static final String FRAGMENT_DECLARATION = """
-        // VOXY_EXCLUSION_ZONES_FRAGMENT_V1
+        // VOXY_EXCLUSION_ZONES_FRAGMENT_V7
         layout(location = 2) in vec3 voxyExcludeWorldPos;
+        layout(location = 3) flat in uint voxyExcludeSynthetic;
+        layout(location = 4) flat in float voxyExcludeLodScale;
 
         struct VoxyExcludeZone {
             ivec4 centerSectionOffset; // section X, section Z, block offset X, block offset Z
@@ -34,7 +41,8 @@ public final class ShaderPatcher {
             VoxyExcludeZone voxyExcludeZones[];
         };
 
-        bool voxyExcludeFragment(vec2 fragmentXZ) {
+        bool voxyExcludeFragment(vec3 fragmentPos, bool synthetic, float lodScale) {
+            bool replacementAllowed = false;
             for (uint i = 0u; i < voxyExcludeHeader.x; ++i) {
                 VoxyExcludeZone zone = voxyExcludeZones[i];
 
@@ -47,21 +55,50 @@ public final class ShaderPatcher {
                     + vec2(zone.centerSectionOffset.z, zone.centerSectionOffset.w);
 
                 float size = float(zone.shape.y);
+                vec2 delta = fragmentPos.xz - zoneCenter;
+                bool inside;
                 if (zone.shape.x == 0) {
-                    vec2 delta = fragmentXZ - zoneCenter;
-                    if (dot(delta, delta) <= size * size) {
-                        return true;
-                    }
+                    inside = dot(delta, delta) <= size * size;
                 } else {
                     vec2 zoneMin = zoneCenter - vec2(size);
                     vec2 zoneMax = zoneCenter + vec2(size);
-                    if (all(greaterThanEqual(fragmentXZ, zoneMin))
-                            && all(lessThanEqual(fragmentXZ, zoneMax))) {
-                        return true;
-                    }
+                    inside = all(greaterThanEqual(fragmentPos.xz, zoneMin))
+                        && all(lessThanEqual(fragmentPos.xz, zoneMax));
                 }
+
+                if (synthetic) {
+                    if (inside && zone.shape.z != 0) {
+                        float surfaceRelativeY = float(zone.shape.w - baseSectionPos.y * 32);
+                        float zoneBottomRelativeY = surfaceRelativeY - 30.0;
+
+                        // Parent LOD voxels represent whole 2^LOD cells. A cell
+                        // containing even one replacement voxel can have its mesh
+                        // face displaced from the exact 30-block slab boundary by
+                        // almost one cell. Clip with that LOD-sized quantization
+                        // margin, otherwise the coarse replacement mesh vanishes.
+                        float verticalTolerance = max(lodScale, 1.0);
+                        bool atSurface = abs(fragmentPos.y - surfaceRelativeY) <= 0.001;
+                        if (fragmentPos.y >= zoneBottomRelativeY - verticalTolerance
+                                && fragmentPos.y <= surfaceRelativeY + verticalTolerance) {
+                            if (atSurface && getFace() != 1u) return true;
+                            replacementAllowed = true;
+                        }
+                    }
+                    continue;
+                }
+
+                if (!inside) continue;
+
+                if (zone.shape.z != 0) {
+                    float surfaceRelativeY = float(zone.shape.w - baseSectionPos.y * 32);
+                    float zoneBottomRelativeY = surfaceRelativeY - 30.0;
+                    if (fragmentPos.y >= zoneBottomRelativeY - 0.001) return true;
+                    continue;
+                }
+
+                return true;
             }
-            return false;
+            return synthetic && !replacementAllowed;
         }
         """;
 
@@ -73,6 +110,9 @@ public final class ShaderPatcher {
         }
         if (FRAGMENT_SHADER.equals(id)) {
             return patchFragment(source);
+        }
+        if (COMMAND_GENERATION_SHADER.equals(id)) {
+            return patchCommandGeneration(source);
         }
         return source;
     }
@@ -104,13 +144,44 @@ public final class ShaderPatcher {
         String firstMainStatement = "void main() {\n";
         requireOnce(source, firstMainStatement, "fragment main body");
         source = source.replace(firstMainStatement, firstMainStatement
-                + "    if (voxyExcludeFragment(voxyExcludeWorldPos.xz)) {\n"
+                + "    if (voxyExcludeSynthetic == 0u && voxyExcludeFragment(voxyExcludeWorldPos, false, voxyExcludeLodScale)) {\n"
                 + "        discard;\n"
                 + "        return;\n"
                 + "    }\n");
+
+        // Voxy's minimum-depth comparison is expressed through a macro in
+        // current versions so reverse-Z and normal-Z use the correct comparison.
+        // Older builds used a literal less-than comparison. Bypass this Voxy
+        // culling test only for synthetic replacement faces; keep the actual
+        // OpenGL depth test active.
+        String macroDepthTest =
+                "if (DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
+        String replacementMacroDepthTest =
+                "if (voxyExcludeSynthetic == 0u && DEPTH_SCALAR_COMPARE(gl_FragCoord.z, texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r)) {";
+        String legacyDepthTest =
+                "if (gl_FragCoord.z < texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r) {";
+        String replacementLegacyDepthTest =
+                "if (voxyExcludeSynthetic == 0u && gl_FragCoord.z < texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r) {";
+
+        if (source.contains(macroDepthTest)) {
+            requireOnce(source, macroDepthTest, "Voxy minimum-depth macro test");
+            source = source.replace(macroDepthTest, replacementMacroDepthTest);
+        } else if (source.contains(legacyDepthTest)) {
+            requireOnce(source, legacyDepthTest, "legacy Voxy minimum-depth test");
+            source = source.replace(legacyDepthTest, replacementLegacyDepthTest);
+        } else {
+            throw new IllegalStateException(
+                    "Voxy exclusion shader patch: unsupported minimum-depth texture test");
+        }
+
         return source;
     }
 
+
+    private static String patchCommandGeneration(String source) {
+        // Keep Voxy's normal section visibility test during the parent-LOD diagnostic.
+        return source;
+    }
     private static void requireOnce(String source, String anchor, String description) {
         int first = source.indexOf(anchor);
         if (first < 0 || source.indexOf(anchor, first + anchor.length()) >= 0) {

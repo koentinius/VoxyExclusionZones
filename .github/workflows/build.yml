@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [1.21.10, 1.21.11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: ${{ matrix.target == '1.21.11' && '9.2.1' || '8.14.3' }}
+      - name: Build Minecraft 1.21.10
+        if: matrix.target == '1.21.10'
+        run: gradle --no-daemon build
+      - name: Build Minecraft 1.21.11
+        if: matrix.target == '1.21.11'
+        run: |
+          gradle --no-daemon build \
+            -Ploom_version=1.14.8 \
+            -Pminecraft_version=1.21.11 \
+            -Pyarn_mappings=1.21.11+build.3 \
+            -Pfabric_version=0.141.6+1.21.11 \
+            -Pmod_version=0.2.0 \
+            -Parchives_base_name=voxy-exclusion-zones-mc1.21.11 \
+            -Pvoxy_version=k5PZxsfL \
+            -Pvoxy_mod_version=0.2.13-alpha \
+            -Psodium_version=UddlN6L4
+      - name: Upload built JARs
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxy-exclusion-zones-${{ matrix.target }}
+          path: build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 14
