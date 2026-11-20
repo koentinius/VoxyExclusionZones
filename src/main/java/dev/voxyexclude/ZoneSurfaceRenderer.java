@@ -7,6 +7,8 @@ import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.Vec3d;
 
+import java.lang.reflect.Method;
+
 /**
  * Draws flat replacement platforms over the areas removed by the Voxy fragment
  * exclusion shader. Geometry is camera-relative and submitted through the
@@ -15,6 +17,7 @@ import net.minecraft.util.math.Vec3d;
 public final class ZoneSurfaceRenderer {
     private static final int CIRCLE_SEGMENTS = 64;
     private static final float SURFACE_EPSILON = 0.002f;
+    private static final RenderLayer DEBUG_QUADS_LAYER = resolveDebugQuadsLayer();
 
     private ZoneSurfaceRenderer() {}
 
@@ -39,7 +42,7 @@ public final class ZoneSurfaceRenderer {
         matrices.push();
 
         try {
-            VertexConsumer vertices = context.consumers().getBuffer(RenderLayer.getDebugQuads());
+            VertexConsumer vertices = context.consumers().getBuffer(DEBUG_QUADS_LAYER);
             MatrixStack.Entry matrix = matrices.peek();
 
             for (Zone zone : zones) {
@@ -55,6 +58,25 @@ public final class ZoneSurfaceRenderer {
             }
         } finally {
             matrices.pop();
+        }
+    }
+
+    /**
+     * Minecraft 1.21.10 exposes this layer on RenderLayer; 1.21.11 moved it
+     * to RenderLayers. Resolve once so the same source supports both targets.
+     */
+    private static RenderLayer resolveDebugQuadsLayer() {
+        try {
+            Method method;
+            try {
+                method = RenderLayer.class.getMethod("getDebugQuads");
+            } catch (NoSuchMethodException movedIn12111) {
+                Class<?> renderLayers = Class.forName("net.minecraft.client.render.RenderLayers");
+                method = renderLayers.getMethod("debugQuads");
+            }
+            return (RenderLayer) method.invoke(null);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Unable to locate Minecraft's debug quad render layer", e);
         }
     }
 
