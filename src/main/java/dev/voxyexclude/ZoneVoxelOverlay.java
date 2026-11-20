@@ -294,8 +294,7 @@ public final class ZoneVoxelOverlay {
         // Do not remember it permanently: Voxy may load or update its real terrain
         // after an earlier acquisition, and that later acquisition needs a refresh.
         if (!processingSectionKeys.add(key)) return;
-        ReentrantLock updateLock = lockForKey(key);
-        updateLock.lock();
+        lockSectionChain(key);
         WorldSection worldSection = null;
         try {
             SUPPRESS_ACQUIRE_ENQUEUE.set(true);
@@ -338,7 +337,7 @@ public final class ZoneVoxelOverlay {
         } finally {
             processingSectionKeys.remove(key);
             if (worldSection != null) worldSection.release();
-            updateLock.unlock();
+            unlockUpdate();
         }
     }
 
@@ -662,7 +661,23 @@ public final class ZoneVoxelOverlay {
             );
             required[lockIndexForKey(key)] = true;
         }
+        lockRequired(required);
+    }
 
+    /** Locks a level-zero 32-block section and all of its parent LOD sections. */
+    private static void lockSectionChain(long levelZeroKey) {
+        int x = WorldEngine.getX(levelZeroKey);
+        int y = WorldEngine.getY(levelZeroKey);
+        int z = WorldEngine.getZ(levelZeroKey);
+        boolean[] required = new boolean[UPDATE_LOCKS.length];
+        for (int level = 0; level <= WorldEngine.MAX_LOD_LAYER; level++) {
+            long key = WorldEngine.getWorldSectionId(level, x >> level, y >> level, z >> level);
+            required[lockIndexForKey(key)] = true;
+        }
+        lockRequired(required);
+    }
+
+    private static void lockRequired(boolean[] required) {
         ArrayDeque<ReentrantLock> held = HELD_UPDATE_LOCKS.get();
         int count = 0;
         for (int i = 0; i < required.length; i++) {
