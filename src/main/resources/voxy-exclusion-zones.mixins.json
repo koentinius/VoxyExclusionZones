@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.voxyexclude.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "voxy-exclusion-zones-refmap.json",
+  "client": [
+    "ShaderLoaderMixin",
+    "MDICSectionRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
