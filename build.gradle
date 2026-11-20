@@ -23,6 +23,17 @@ loom {
     }
 }
 
+// Voxy moved MDICSectionRenderer and MDICViewport into backend.mdic in 1.21.11.
+// Compile exactly one matching mixin source variant for the selected Minecraft target.
+sourceSets {
+    main {
+        java {
+            exclude 'dev/voxyexclude/mixin/MDICSectionRendererMixin.java'
+            srcDir "src/${project.minecraft_version}/java"
+        }
+    }
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
