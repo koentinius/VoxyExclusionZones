@@ -36,6 +36,8 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class ZoneVoxelOverlay {
     private static final int SECTION_BLOCK_SIZE = 32;
     private static final int REPLACEMENT_DEPTH_BLOCKS = 30;
+    // Reserved synthetic marker in Voxy's 9-bit biome field (vanilla IDs are below 256).
+    public static final int SYNTHETIC_BIOME_ID = 256;
     private static final int MAX_QUEUED_SECTIONS = 500_000;
     private static final int SECTIONS_PER_TICK = 3;
 
@@ -416,7 +418,8 @@ public final class ZoneVoxelOverlay {
             // Every voxel in the synthetic volume must use identical material,
             // light, and biome data. Preserving metadata from the original terrain
             // creates visible block-shaped shading/biome seams in the replacement.
-            replacementIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
+            replacementIds[i] = Mapper.composeMappingId(zoneData.light,
+                    mapper.getIdForBlockState(zoneData.state), SYNTHETIC_BIOME_ID);
             intersects[i] = true;
             anyIntersect = true;
         }
@@ -553,6 +556,23 @@ public final class ZoneVoxelOverlay {
                 data[mip3Index(0, 1, 1)], data[mip3Index(1, 1, 1)],
                 mapper
         );
+    }
+
+    /** Preserve synthetic replacement material when any child contributes to a coarse mip cell. */
+    private static long mipWithSyntheticPriority(
+            long i000, long i100, long i001, long i101,
+            long i010, long i110, long i011, long i111,
+            Mapper mapper
+    ) {
+        if (Mapper.getBiomeId(i111) == SYNTHETIC_BIOME_ID) return i111;
+        if (Mapper.getBiomeId(i110) == SYNTHETIC_BIOME_ID) return i110;
+        if (Mapper.getBiomeId(i011) == SYNTHETIC_BIOME_ID) return i011;
+        if (Mapper.getBiomeId(i010) == SYNTHETIC_BIOME_ID) return i010;
+        if (Mapper.getBiomeId(i101) == SYNTHETIC_BIOME_ID) return i101;
+        if (Mapper.getBiomeId(i100) == SYNTHETIC_BIOME_ID) return i100;
+        if (Mapper.getBiomeId(i001) == SYNTHETIC_BIOME_ID) return i001;
+        if (Mapper.getBiomeId(i000) == SYNTHETIC_BIOME_ID) return i000;
+        return Mipper.mip(i000, i100, i001, i101, i010, i110, i011, i111, mapper);
     }
 
     private static int voxelIndex(int x, int y, int z) {
