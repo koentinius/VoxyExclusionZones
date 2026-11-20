@@ -8,6 +8,8 @@
     "ShaderLoaderMixin",
     "MDICSectionRendererMixin",
     "WorldUpdaterMixin",
+    "VoxelIngestServiceAccessor",
+    "VoxelIngestServiceMixin",
     "RenderDataFactoryMixin",
     "RenderGenerationServiceMixin",
     "MipperMixin",
