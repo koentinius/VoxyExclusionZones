@@ -7,7 +7,7 @@ Separate Fabric client addon for Minecraft 1.21.10, targeting Voxy 0.2.6-alpha a
 - For Minecraft 1.21.10, double-click `build.bat`.
 - For Minecraft 1.21.11, double-click `build-1.21.11.bat`. This selects Yarn `1.21.11+build.3`, Fabric API `0.141.5+1.21.11`, Voxy `0.2.8-alpha`, and Sodium `0.8.2`.
 
-The 1.21.11 launcher is a separate dependency/build target. It is not yet a verified runtime port: the Voxy shader and renderer Mixin targets must still be checked against that exact Voxy build and tested in-game.
+The 1.21.11 launcher is a separate dependency/build target (Voxy 0.2.8-alpha and Sodium 0.8.2 for Fabric). A CI workflow now compiles both targets. It is not yet a verified runtime port: the Voxy shader and renderer Mixin targets must still be checked against that exact Voxy build and tested in-game.
 
 You do **not** need to install Gradle manually.
 
@@ -41,7 +41,7 @@ Voxy and Sodium are compile-time dependencies only. Neither is bundled into the 
 ## Features in this source snapshot
 
 - Named circular zones (`radius`) and square zones (`halfSize`) in horizontal X/Z coordinates.
-- Persistent JSON config at `config/voxy-exclusion-zones.json`.
+- Separate JSON configs are stored under `config/voxy-exclusion-zones/`: multiplayer servers use a SHA-256 key derived from the configured server address, and single-player worlds use a SHA-256 key derived from the persistent save path. The old `config/voxy-exclusion-zones.json` is migrated to the first world/server config entered after updating.
 - Commands:
   - `/voxyexclude add circle <name> <x> <z> <radius>`
   - `/voxyexclude add square <name> <x> <z> <halfSize>`
@@ -53,7 +53,7 @@ Voxy and Sodium are compile-time dependencies only. Neither is bundled into the 
 - `/voxyexclude surface <name> <water|grass|sand> <y>` — configure a replacement surface for a zone at an absolute world Y level.
 - `/voxyexclude surfaceoff <name>` — disable that zone's replacement surface.
 - New zones are disabled by default. The initial configuration is empty.
-- Per-zone replacement-surface settings are persisted in config version 2. Existing version 1 files are migrated when loaded; their replacement surfaces default to off.
+- Per-zone replacement-surface settings are persisted in config version 2. Existing version 1 files are migrated when loaded; their replacement surfaces default to off. Configs now switch automatically on world/server join and are unloaded on disconnect.
 - Replacement-surface configuration is now stored and included in the GPU zone data. The actual platform geometry/render pass is not yet implemented in this intermediate build, so these settings do not draw a platform yet.
 - The addon patches Voxy 0.2.6-alpha's `voxy:lod/gl46/quads3.vert` and `voxy:lod/gl46/quads.frag` shaders.
 - The vertex shader passes interpolated block-space positions to the fragment shader. The fragment shader discards individual fragments whose X/Z positions fall inside enabled zones.
