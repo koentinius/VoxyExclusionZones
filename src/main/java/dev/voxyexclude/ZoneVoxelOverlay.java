@@ -1,12 +1,11 @@
 package dev.voxyexclude;
 
-import me.cortex.voxy.client.core.IVoxyRenderSystemHolder;
-import me.cortex.voxy.client.core.VoxyRenderSystem;
 import me.cortex.voxy.common.voxelization.VoxelizedSection;
 import me.cortex.voxy.common.voxelization.WorldVoxilizedSectionMipper;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldSection;
 import me.cortex.voxy.common.world.WorldUpdater;
+import me.cortex.voxy.commonImpl.WorldIdentifier;
 import me.cortex.voxy.common.world.other.Mapper;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -115,8 +114,7 @@ public final class ZoneVoxelOverlay {
     }
 
     private static void syncEngine(MinecraftClient client, Snapshot previous, Snapshot current) {
-        VoxyRenderSystem renderer = IVoxyRenderSystemHolder.getNullable();
-        WorldEngine engine = renderer == null ? null : renderer.getEngine();
+        WorldEngine engine = client.world == null ? null : WorldIdentifier.ofEngine(client.world);
 
         if (engine != activeEngine) {
             activeEngine = engine;
