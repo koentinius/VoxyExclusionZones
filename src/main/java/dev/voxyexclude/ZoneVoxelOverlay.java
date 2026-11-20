@@ -320,6 +320,7 @@ public final class ZoneVoxelOverlay {
         Mapper mapper = engine.getMapper();
         long[] replacementIds = new long[current.zones.size()];
         boolean[] intersects = new boolean[current.zones.size()];
+        boolean anyIntersect = false;
         for (int i = 0; i < current.zones.size(); i++) {
             ZoneData zoneData = current.zones.get(i);
             Zone zone = zoneData.zone;
@@ -327,7 +328,9 @@ public final class ZoneVoxelOverlay {
                     || !intersectsHorizontalBounds(minX, minZ, maxX, maxZ, zone)) continue;
             replacementIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
             intersects[i] = true;
+            anyIntersect = true;
         }
+        if (!anyIntersect) return;
 
         long[] data = section._unsafeGetRawDataArray();
         boolean changed = false;
@@ -432,6 +435,7 @@ public final class ZoneVoxelOverlay {
 
         long[] replacementIds = new long[current.zones.size()];
         boolean[] intersects = new boolean[current.zones.size()];
+        boolean anyIntersect = false;
         for (int i = 0; i < current.zones.size(); i++) {
             ZoneData zoneData = current.zones.get(i);
             Zone zone = zoneData.zone;
@@ -442,7 +446,9 @@ public final class ZoneVoxelOverlay {
             }
             replacementIds[i] = mapper.getBaseId(zoneData.light, zoneData.state, zoneData.biome);
             intersects[i] = true;
+            anyIntersect = true;
         }
+        if (!anyIntersect) return false;
 
         boolean changed = false;
         for (int y = 0; y < 16; y++) {
