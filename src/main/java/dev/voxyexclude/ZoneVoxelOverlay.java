@@ -438,14 +438,16 @@ public final class ZoneVoxelOverlay {
                         Zone zone = current.zones.get(i).zone;
                         int zoneBottomY = Math.max(current.bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
                         if (intersects[i] && containsBlock(zone, blockX, blockZ)) {
-                            if (blockY == zone.surfaceY()) {
-                                // Voxy culls the shared face between opaque
-                                // replacement blocks and the original terrain
-                                // above them. Make that first terrain layer air
-                                // in the synthetic view so the replacement's UP
-                                // face is emitted by the normal section mesher.
+                            if (blockY >= zone.surfaceY()) {
+                                // The shader excludes all original terrain at and
+                                // above the configured surface. Keep the voxel data
+                                // consistent before Voxy builds mip levels: leaving
+                                // terrain above this plane in the input lets an
+                                // original block win Mipper's corner-priority
+                                // selection, then get discarded by the shader. That
+                                // can erase the replacement in coarse LODs.
                                 replacement = Mapper.composeMappingId((byte) 15, 0, 0);
-                            } else if (blockY >= zoneBottomY && blockY < zone.surfaceY()) {
+                            } else if (blockY >= zoneBottomY) {
                                 replacement = replacementIds[i];
                             }
                         }
