@@ -58,6 +58,7 @@ public final class ZoneVoxelOverlay {
     private static final ArrayDeque<Long> pendingSections = new ArrayDeque<>();
     private static final ConcurrentLinkedQueue<Long> acquiredSections = new ConcurrentLinkedQueue<>();
     private static final Set<Long> acquiredSectionKeys = ConcurrentHashMap.newKeySet();
+    private static final Set<Long> processedSectionKeys = ConcurrentHashMap.newKeySet();
 
     private ZoneVoxelOverlay() {}
 
@@ -282,6 +283,11 @@ public final class ZoneVoxelOverlay {
     }
 
     private static void processSection(WorldEngine engine, long key, boolean restoreFromStorage) {
+        // A section only needs this acquisition-time refresh once. Later terrain
+        // ingestion is overlaid by beginIngest(), so rendering/acquisition must
+        // not continually enqueue the same already-processed section.
+        if (!processedSectionKeys.add(key)) return;
+        boolean completed = false;
         ReentrantLock updateLock = lockForKey(key);
         updateLock.lock();
         WorldSection worldSection = null;
@@ -323,7 +329,9 @@ public final class ZoneVoxelOverlay {
                     }
                 }
             }
+            completed = true;
         } finally {
+            if (!completed) processedSectionKeys.remove(key);
             if (worldSection != null) worldSection.release();
             updateLock.unlock();
         }
@@ -341,7 +349,9 @@ public final class ZoneVoxelOverlay {
         int maxY = minY + SECTION_BLOCK_SIZE;
         for (ZoneData zoneData : current.zones) {
             Zone zone = zoneData.zone;
-            if (maxY > current.bottomY && minY < zone.surfaceY()
+            int zoneBottomY = Math.max(current.bottomY, zone.surfaceY() - REPLACEMENT_DEPTH_BLOCKS);
+            if (maxY > zoneBottomY && minY < zone.surfaceY()
+                    && !processedSectionKeys.contains(section.key)
                     && intersectsHorizontalSection(section.x, section.z, zone)) {
                 if (acquiredSectionKeys.add(section.key)) acquiredSections.offer(section.key);
                 return;
@@ -606,6 +616,7 @@ public final class ZoneVoxelOverlay {
         pendingSections.clear();
         acquiredSections.clear();
         acquiredSectionKeys.clear();
+        processedSectionKeys.clear();
         pendingTargetSnapshot = null;
         pendingRestore = false;
     }
