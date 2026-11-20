@@ -174,27 +174,13 @@ public final class ShaderPatcher {
                     "Voxy exclusion shader patch: unsupported minimum-depth texture test");
         }
 
-        // Diagnostic: color synthetic fragments magenta after Voxy's depth
-        // and alpha tests, immediately before its final output path.
-        String outputAnchor = "    #ifndef PATCHED_SHADER\n    colour = computeColour(texPos, colour);";
-        requireOnce(source, outputAnchor, "fragment output path");
-        source = source.replace(outputAnchor,
-                "    if (voxyExcludeSynthetic != 0u) colour = vec4(1.0, 0.0, 1.0, 1.0);\n"
-                + outputAnchor);
         return source;
     }
 
 
-    private static final String COMMAND_GENERATION_MARKER = "VOXY_EXCLUSION_ZONES_FORCE_VISIBLE_DIAGNOSTIC_V1";
-
     private static String patchCommandGeneration(String source) {
-        if (source.contains(COMMAND_GENERATION_MARKER)) {
-            return source;
-        }
-        String anchor = "bool shouldRender = (dat&0x7fffffffu) == frameId;";
-        requireOnce(source, anchor, "section visibility-buffer test");
-        return source.replace(anchor, "// " + COMMAND_GENERATION_MARKER + "\n"
-                + "bool shouldRender = true;");
+        // Keep Voxy's normal section visibility test during the parent-LOD diagnostic.
+        return source;
     }
     private static void requireOnce(String source, String anchor, String description) {
         int first = source.indexOf(anchor);
