@@ -162,7 +162,13 @@ public final class ZoneManager {
     public static void switchStorage(Path target) throws IOException {
         Path normalized = target.toAbsolutePath().normalize();
         synchronized (LOCK) {
-            ensureLoaded();
+            if (!loaded) {
+                configFile = normalized;
+                loadCurrentFile();
+                loaded = true;
+                revision++;
+                return;
+            }
             if (normalized.equals(configFile.toAbsolutePath().normalize())) return;
             if (!legacyMigrationConsidered) {
                 legacyMigrationConsidered = true;
