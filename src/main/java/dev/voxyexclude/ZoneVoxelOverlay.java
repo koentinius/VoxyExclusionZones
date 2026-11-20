@@ -866,7 +866,7 @@ public final class ZoneVoxelOverlay {
                 try {
                     int synthetic = 0;
                     int nonAir = 0;
-                    for (long value : stored.data) {
+                    for (long value : stored._unsafeGetRawDataArray()) {
                         if ((value & SYNTHETIC_VOXEL_MARKER) != 0) synthetic++;
                         if (!Mapper.isAir(value)) nonAir++;
                     }
