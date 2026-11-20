@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "GRADLE_VERSION=8.14.3"
+set "GRADLE_VERSION=9.2.1"
 set "BOOTSTRAP_DIR=%CD%\.gradle-bootstrap"
 set "GRADLE_HOME=%BOOTSTRAP_DIR%\gradle-%GRADLE_VERSION%"
 set "GRADLE_EXE=%GRADLE_HOME%\bin\gradle.bat"
@@ -17,7 +17,7 @@ if not exist "%GRADLE_EXE%" (
 )
 
 call "%GRADLE_EXE%" --no-daemon build ^
-  -Ploom_version=1.13.6 ^
+  -Ploom_version=1.14.8 ^
   -Pminecraft_version=1.21.11 ^
   -Pyarn_mappings=1.21.11+build.3 ^
   -Pfabric_version=0.141.5+1.21.11 ^
